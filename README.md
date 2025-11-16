@@ -125,8 +125,3 @@ black cli tests
 # Lint
 ruff check cli tests
 ```
-
-## License
-
-MIT
-
