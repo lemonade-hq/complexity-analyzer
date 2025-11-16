@@ -1,0 +1,172 @@
+Prompt-Version: 1
+
+You are given:
+- A pull request (PR) diff excerpt (which may be truncated),
+- Lightweight PR metadata (stats JSON and title).
+
+Your task:
+Estimate the *implementation complexity* of the PR on a 1–10 integer scale, and briefly explain your reasoning.
+
+The goal of measuring complexity is to approximate how "hard" the PR was to implement from a developer's perspective (design/implementation/testing effort), not how risky or operationally expensive it is. Think in terms of developer velocity: how much time/effort a competent team member would likely spend to implement and validate the change.
+
+You MUST respond with a single strict JSON object of the form:
+{"complexity": <int 1..10>, "explanation": "<short rationale>"}
+
+Constraints and formatting:
+- `complexity` must be an integer between 1 and 10 inclusive.
+- `explanation` must be a short, single-string rationale (no newlines).
+- Do NOT include any additional top-level keys.
+- Do NOT include any text before or after the JSON.
+- Do NOT include comments or trailing commas in the JSON.
+
+------------------------------------------------------------
+INPUT FORMAT AND SIGNALS
+------------------------------------------------------------
+
+You will typically see these fields:
+
+1. `diff_excerpt`
+   - Contains:
+     - PR URL, title,
+     - High-level stats summary,
+     - File list,
+     - A unified diff between `--- DIFF START ---` and `--- DIFF END ---`.
+   - The diff may be large or truncated.
+   - Many added/changed lines may be static data (e.g., CSV rows, JSON dependency blobs, YAML config) rather than executable logic.
+
+2. `stats_json`
+   - A machine-readable summary, e.g.:
+     {"additions": 170403, "deletions": 0, "changedFiles": 3, "byExt": {"ts": 2, "csv": 1}, "byLang": {"TypeScript": 2, "Other": 1}, "fileCount": 3}
+   - Use it to understand:
+     - File count and languages,
+     - How many lines changed overall,
+     - Whether diffs are dominated by data files vs code files.
+
+3. `title`
+   - A short human-written description, e.g.:
+     - "feat(migration): implement entry point loader for policies and quotes"
+     - "feat(infra): Pet - HUD integration"
+     - "fix(dev): resolve issue with start when no initiatives available"
+   - Often indicates whether this is a feature, infra change, bugfix, or refactor and hints at scope.
+
+------------------------------------------------------------
+WHAT "COMPLEXITY" MEANS HERE
+------------------------------------------------------------
+
+Complexity is about *code and logic complexity and breadth of changes*, not raw line count or operational risk.
+
+Think about:
+- How much non-trivial logic was added or changed.
+- How many modules/services/components are involved.
+- The conceptual difficulty of the workflows, algorithms, or mappings.
+- The testing effort implied by the changes.
+
+Avoid conflating:
+- Large diffs of mostly static data or dependency lockfile churn with high complexity.
+- Operational risk (e.g., dangerous migrations, big dependency upgrades) with implementation difficulty.
+
+------------------------------------------------------------
+KEY FACTORS TO CONSIDER
+------------------------------------------------------------
+
+1. Nature of the changes
+
+Low complexity (1–3) usually looks like:
+- Very localized changes in a small number of files.
+- Simple DTO/validation tweaks, e.g. adding or adjusting decorators (`@IsEnum`, `@IsNumber`, `@Min`, `@IsOptional`, `@ValidateNested`, `@TransformType`, `@ApiProperty`, etc.).
+- Minor bugfixes: adding a guard clause, null checks, changing a simple condition, or allowing an extra enum value.
+- Small, straightforward tests around new validations or edge cases.
+- Simple schema changes: adding a column, creating a table with a few columns and indexes, migrations whose up/down are obvious and linear.
+
+Moderate complexity (4–6) often involves:
+- Multiple modules/services with non-trivial control flow changes.
+- New classes/abstractions with some interactions: e.g. a new service layer that calls existing clients and maps between domains.
+- Migration/ETL logic that maps multiple fields, runs calculations, and orchestrates several entities.
+- A moderate test suite covering multiple scenarios.
+
+High complexity (7–10) is characterized by:
+- Large or cross-cutting refactors across many files and layers.
+- Complex business workflows or algorithms (e.g., multi-stage historical data migration with stateful orchestration, intricate mapping and fallbacks).
+- Concurrency, caching, authorization, or other cross-cutting concerns with subtle interactions.
+- Non-trivial, stateful data migrations with tricky invariants or bidirectional compatibility.
+
+2. Volume and type of content
+
+- Do *not* equate huge line counts with high complexity if most changed lines are:
+  - Package lockfiles (`package-lock.json`, `yarn.lock`),
+  - CSV/JSON/YAML data, large fixtures, or generated data blobs.
+- Treat dependency version bumps, especially when shown only in lockfiles, as mostly *noise* for complexity scoring unless accompanied by significant code changes.
+- For lockfile-heavy diffs, focus on:
+  - Whether `package.json` or code actually introduces new runtime usage (e.g. new SDKs, instrumentation logic),
+  - How much custom code was written to integrate them.
+
+------------------------------------------------------------
+SCORING HEURISTIC
+------------------------------------------------------------
+
+Use these as approximate bands; choose an integer within them:
+
+1–2: Almost trivial
+- Tiny, localized changes (single guard clause, simple config key rename, a single decorator).
+- Very small migrations (add/drop a column) without complex logic or tests.
+- Simple test changes or minimal env/config tweaks.
+
+3–4: Small but non-trivial
+- Localized to a small area of the codebase.
+- Adds simple business logic or data transformations (e.g., basic mappings, simple recursion with guard flags).
+- Moderately sized validation or UX logic with straightforward conditionals.
+- Some focused tests or fixtures, but complexity comes more from coverage than concept.
+
+5–6: Medium
+- Several modules/services/entities and handlers touched.
+- Non-trivial orchestration of existing services (e.g. multi-stage migration flow, mapping between historical and internal domains, computed fields).
+- Creation of multiple DTOs and mappings; usage of helper functions and mapping tables.
+- Comprehensive test coverage across different layers.
+- Complexity sits in understanding and correctly wiring these flows, yet still within one domain boundary and following existing patterns.
+
+7–8: Large or sophisticated
+- Cross-cutting changes across numerous modules or microservices.
+- New complex workflows (e.g., full redesign of a migration pipeline, new concurrency model, intricate error-handling and retry logic).
+- Many interacting abstractions and non-trivial invariants.
+- Broad and deep test changes.
+
+9–10: Very complex
+- Major architectural changes involving many components/services.
+- Very intricate data migrations with bidirectional compatibility constraints and rollback considerations.
+- Complex algorithmic work or heavily stateful systems with concurrency, distribution, and security interactions.
+
+When in doubt:
+- Favor the *middle* of the closest band rather than extremes.
+- Prefer not to over-penalize large configuration or lockfile diffs.
+
+------------------------------------------------------------
+HOW TO FORM YOUR RATIONALE
+------------------------------------------------------------
+
+`explanation` should be a concise, single-line summary referencing specific aspects of the diff:
+
+- Mention:
+  - The number/nature of files touched (e.g. "multiple migration handlers and services" vs "a few infra files").
+  - The type of work (e.g. "historical data migration with mappings", "infra env wiring and dependency bumps", "Slack UI fallback and recursive lookup").
+  - Why that implies the chosen complexity band (e.g. "localized", "broad but pattern-based", "non-trivial calculations and mappings").
+
+- Do *not*:
+  - Refer to raw addition counts without context.
+  - Overemphasize lockfile or data-file size.
+  - Include line breaks.
+
+Examples of good explanations:
+- "Implements multiple historical quote and policy migration handlers and services with detailed mappings, computations, and tests across many TS files; non-trivial domain logic but contained within a single migration domain."
+- "Primarily infra wiring to integrate HUD via env vars plus large dependency/lockfile updates; few code files and straightforward configuration, so logical complexity is modest."
+- "Localized Slack/Fibery bugfix adding edge-case handling when initiatives are absent and a simple recursive fallback to previous quarter; logic is clear and limited in scope."
+
+------------------------------------------------------------
+OUTPUT REQUIREMENTS
+------------------------------------------------------------
+
+Produce exactly:
+
+{"complexity": <int>, "explanation": "<short, single-line rationale>"}
+
+No additional keys, no extra text around the JSON, no newlines in the explanation.
+
