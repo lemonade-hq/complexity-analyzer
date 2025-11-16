@@ -15,7 +15,7 @@ from .preprocess import process_diff, make_prompt_input
 from .io_safety import read_text_file, write_json_atomic, normalize_path
 from .scoring import InvalidResponseError
 
-app = typer.Typer(help="Analyze GitHub PR complexity using LLMs", invoke_without_command=True)
+app = typer.Typer(help="Analyze GitHub PR complexity using LLMs")
 
 # Regex to parse PR URL
 _OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
@@ -245,20 +245,8 @@ def analyze_pr(
     )
 
 
-@app.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    pr_url: Optional[str] = typer.Argument(None, help="GitHub PR URL: https://github.com/<owner>/<repo>/pull/<num>"),
-    prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
-    model: str = typer.Option("gpt-5.1", "--model", "-m", help="OpenAI model name"),
-    format: str = typer.Option("json", "--format", "-f", help="Output format: json or markdown"),
-    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write output to file"),
-    timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
-    max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
-    hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
-    sleep_seconds: float = typer.Option(0.7, "--sleep-seconds", help="Sleep between GitHub API calls"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
-):
+@app.callback(invoke_without_command=True, no_args_is_help=False)
+def main(ctx: typer.Context):
     """
     Analyze a GitHub PR and compute complexity score.
     
@@ -266,24 +254,40 @@ def main(
     - GH_TOKEN or GITHUB_TOKEN: GitHub API token (optional for public repos)
     - OPENAI_API_KEY: OpenAI API key (required)
     """
-    if ctx.invoked_subcommand is None:
-        if pr_url is None:
-            typer.echo("Error: PR URL is required", err=True)
-            typer.echo("Usage: complexity-cli analyze-pr <PR_URL>", err=True)
-            typer.echo("   or: complexity-cli <PR_URL>", err=True)
-            raise typer.Exit(1)
-        _analyze_pr_impl(
-            pr_url=pr_url,
-            prompt_file=prompt_file,
-            model=model,
-            format=format,
-            out=out,
-            timeout=timeout,
-            max_tokens=max_tokens,
-            hunks_per_file=hunks_per_file,
-            sleep_seconds=sleep_seconds,
-            dry_run=dry_run,
-        )
+    # If a subcommand was invoked, let it handle things
+    if ctx.invoked_subcommand is not None:
+        return
+    
+    # Otherwise, handle direct URL invocation
+    # Get the first argument from ctx.args
+    if not ctx.args or len(ctx.args) == 0:
+        typer.echo("Error: PR URL is required", err=True)
+        typer.echo("Usage: complexity-cli analyze-pr <PR_URL>", err=True)
+        typer.echo("   or: complexity-cli <PR_URL>", err=True)
+        raise typer.Exit(1)
+    
+    # Check if first arg looks like a URL
+    first_arg = ctx.args[0]
+    if not _OWNER_REPO_RE.match(first_arg):
+        typer.echo(f"Error: Invalid PR URL: {first_arg}", err=True)
+        typer.echo("Usage: complexity-cli analyze-pr <PR_URL>", err=True)
+        typer.echo("   or: complexity-cli <PR_URL>", err=True)
+        raise typer.Exit(1)
+    
+    # For direct invocation, use defaults (options require analyze-pr subcommand)
+    typer.echo("Note: For options like --model, --format, etc., use 'complexity-cli analyze-pr <URL> [OPTIONS]'", err=True)
+    _analyze_pr_impl(
+        pr_url=first_arg,
+        prompt_file=None,
+        model="gpt-5.1",
+        format="json",
+        out=None,
+        timeout=120.0,
+        max_tokens=50000,
+        hunks_per_file=2,
+        sleep_seconds=0.7,
+        dry_run=False,
+    )
 
 
 if __name__ == "__main__":

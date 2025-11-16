@@ -4,11 +4,7 @@ A command-line tool to analyze GitHub pull request complexity using LLMs.
 
 ## Installation
 
-```bash
-pip install complexity-cli
-```
-
-Or install from source:
+Install from source:
 
 ```bash
 git clone <repo-url>
