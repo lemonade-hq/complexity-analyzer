@@ -1,5 +1,4 @@
 """Diff preprocessing: redaction, filtering, chunking, and stats."""
-import json
 import os
 import re
 from typing import Dict, Any, List, Tuple

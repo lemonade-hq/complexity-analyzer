@@ -1,7 +1,7 @@
 """Tests for GitHub module."""
 import pytest
 from unittest.mock import patch, Mock
-from cli.github import fetch_pr_diff, fetch_pr_metadata, GitHubAPIError
+from cli.github import fetch_pr_diff
 
 
 @patch("cli.github.httpx.Client")

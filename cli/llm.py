@@ -1,7 +1,6 @@
 """LLM provider adapter with JSON schema validation and retries."""
-import json
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from openai import OpenAI
 from .scoring import parse_complexity_response, InvalidResponseError
 
