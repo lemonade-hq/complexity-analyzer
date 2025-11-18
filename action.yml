@@ -9,7 +9,8 @@ branding:
 inputs:
   pr-url:
     description: 'GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)'
-    required: true
+    required: false
+    default: ${{ github.event.pull_request.html_url }}
   openai-api-key:
     description: 'OpenAI API key for LLM analysis'
     required: true
@@ -44,114 +45,35 @@ inputs:
     description: 'Sleep between GitHub API calls'
     required: false
     default: '0.7'
-  python-version:
-    description: 'Python version to use'
-    required: false
-    default: '3.11'
 
 outputs:
   score:
     description: 'Complexity score (1-10)'
-    value: ${{ steps.analyze.outputs.score }}
   explanation:
     description: 'Explanation of the complexity score'
-    value: ${{ steps.analyze.outputs.explanation }}
   output:
-    description: 'Full JSON output from the analyzer'
-    value: ${{ steps.analyze.outputs.output }}
+    description: 'Full analysis result in JSON format'
 
 runs:
-  using: 'composite'
-  steps:
-    - name: Checkout complexity-analyzer
-      uses: actions/checkout@v4
-      with:
-        repository: your-org/complexity-analyzer
-        path: .complexity-analyzer-tool
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ inputs.python-version }}
-    
-    - name: Install complexity-analyzer
-      shell: bash
-      run: |
-        cd .complexity-analyzer-tool
-        python -m pip install --upgrade pip
-        pip install -e .
-    
-    - name: Run complexity analysis
-      id: analyze
-      shell: bash
-      env:
-        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        # Build the command
-        CMD="complexity-cli analyze-pr \"${{ inputs.pr-url }}\" --model \"${{ inputs.model }}\" --format \"${{ inputs.format }}\" --timeout ${{ inputs.timeout }} --max-tokens ${{ inputs.max-tokens }} --hunks-per-file ${{ inputs.hunks-per-file }} --sleep-seconds ${{ inputs.sleep-seconds }}"
-        
-        # Add output file if specified
-        if [ -n "${{ inputs.output-file }}" ]; then
-          CMD="$CMD --out \"${{ inputs.output-file }}\""
-        fi
-        
-        # Run the command and capture output
-        echo "Running: $CMD"
-        OUTPUT=$(eval $CMD)
-        EXIT_CODE=$?
-        
-        if [ $EXIT_CODE -ne 0 ]; then
-          echo "Error: complexity-cli failed with exit code $EXIT_CODE"
-          exit $EXIT_CODE
-        fi
-        
-        echo "Analysis complete!"
-        echo "$OUTPUT"
-        
-        # Parse JSON output to extract score and explanation
-        SCORE=$(echo "$OUTPUT" | jq -r '.score // empty')
-        EXPLANATION=$(echo "$OUTPUT" | jq -r '.explanation // empty')
-        
-        # Set outputs
-        if [ -n "$SCORE" ]; then
-          echo "score=$SCORE" >> $GITHUB_OUTPUT
-          echo "Complexity Score: $SCORE"
-        fi
-        
-        if [ -n "$EXPLANATION" ]; then
-          # Escape special characters for GitHub Actions output
-          EXPLANATION_ESCAPED=$(echo "$EXPLANATION" | jq -Rs .)
-          echo "explanation=$EXPLANATION_ESCAPED" >> $GITHUB_OUTPUT
-          echo "Explanation: $EXPLANATION"
-        fi
-        
-        # Store full output as JSON string
-        OUTPUT_ESCAPED=$(echo "$OUTPUT" | jq -Rs .)
-        echo "output=$OUTPUT_ESCAPED" >> $GITHUB_OUTPUT
-    
-    - name: Comment on PR (if format is markdown)
-      if: inputs.format == 'markdown' && github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const output = JSON.parse(${{ steps.analyze.outputs.output }});
-          const markdown = `# PR Complexity Analysis
-          
-          **Score:** ${output.score}/10
-          
-          **Explanation:** ${output.explanation}
-          
-          **Details:**
-          - Model: ${output.model}
-          - Tokens used: ${output.tokens || 'N/A'}
-          - Timestamp: ${output.timestamp}`;
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: markdown
-          });
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - 'analyze-pr'
+    - '--openai-api-key'
+    - '${{ inputs.openai-api-key }}'
+    - '--github-token'
+    - '${{ inputs.github-token }}'
+    - '--model'
+    - '${{ inputs.model }}'
+    - '--format'
+    - '${{ inputs.format }}'
+    - '--output-file'
+    - '${{ inputs.output-file }}'
+    - '--timeout'
+    - '${{ inputs.timeout }}'
+    - '--max-tokens'
+    - '${{ inputs.max-tokens }}'
+    - '--hunks-per-file'
+    - '${{ inputs.hunks-per-file }}'
+    - '--sleep-seconds'
+    - '${{ inputs.sleep-seconds }}'
