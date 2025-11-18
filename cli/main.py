@@ -49,13 +49,15 @@ def _analyze_pr_impl(
     prompt_file: Optional[Path] = None,
     model: str = "gpt-5.1",
     format: str = "json",
-    out: Optional[Path] = None,
+    output_file: Optional[Path] = None,
     timeout: float = 120.0,
     max_tokens: int = 50000,
     hunks_per_file: int = 2,
     sleep_seconds: float = 0.7,
     dry_run: bool = False,
     post_comment: bool = False,
+    openai_api_key: Optional[str] = None,
+    github_token: Optional[str] = None,
 ):
     """
     Analyze a GitHub PR and compute complexity score.
@@ -70,13 +72,13 @@ def _analyze_pr_impl(
         validate_owner_repo(owner, repo)
         validate_pr_number(pr)
         
-        # Get credentials
-        github_token = get_github_token()
-        openai_key = get_openai_api_key()
+        # Get credentials (arg takes precedence over env)
+        final_github_token = github_token or get_github_token()
+        final_openai_key = openai_api_key or get_openai_api_key()
         
-        if not openai_key:
-            typer.echo("Error: OPENAI_API_KEY environment variable is required", err=True)
-            typer.echo("Set it with: export OPENAI_API_KEY='your-key'", err=True)
+        if not final_openai_key:
+            typer.echo("Error: OPENAI_API_KEY environment variable or argument is required", err=True)
+            typer.echo("Set it with: export OPENAI_API_KEY='your-key' or pass --openai-api-key", err=True)
             raise typer.Exit(1)
         
         # Load prompt
@@ -89,14 +91,13 @@ def _analyze_pr_impl(
         # Fetch PR
         typer.echo(f"Fetching PR {owner}/{repo}#{pr}...", err=True)
         try:
-            diff_text, meta = fetch_pr(owner, repo, pr, github_token, sleep_s=sleep_seconds)
+            diff_text, meta = fetch_pr(owner, repo, pr, final_github_token, sleep_s=sleep_seconds)
         except GitHubAPIError as e:
             if e.status_code == 404:
                 typer.echo(f"Error: PR not found or not accessible", err=True)
                 typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
-                if not github_token:
-                    typer.echo(f"  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN environment variable", err=True)
-                    typer.echo(f"  Example: export GH_TOKEN='your-token'", err=True)
+                if not final_github_token:
+                    typer.echo(f"  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN", err=True)
                 else:
                     typer.echo(f"  Hint: Check that the PR exists and you have access to it", err=True)
             else:
@@ -127,7 +128,7 @@ def _analyze_pr_impl(
         # Call LLM
         typer.echo("Analyzing complexity with LLM...", err=True)
         try:
-            provider = OpenAIProvider(openai_key, model=model, timeout=timeout)
+            provider = OpenAIProvider(final_openai_key, model=model, timeout=timeout)
             result = provider.analyze_complexity(
                 prompt=prompt_text,
                 diff_excerpt=diff_for_prompt,
@@ -209,15 +210,15 @@ def _analyze_pr_impl(
                 f.write(f"output={full_output_json}\n")
         
         # Write to file if requested
-        if out:
+        if output_file:
             try:
                 # Normalize path for safety
-                if out.is_absolute():
+                if output_file.is_absolute():
                     # Allow absolute paths but warn
-                    output_path = out
+                    output_path = output_file
                 else:
                     # Relative to current directory
-                    output_path = normalize_path(Path.cwd(), str(out))
+                    output_path = normalize_path(Path.cwd(), str(output_file))
                 
                 write_json_atomic(output_path, output)
                 typer.echo(f"Output written to: {output_path}", err=True)
@@ -257,12 +258,14 @@ def analyze_pr(
     prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
     model: str = typer.Option("gpt-5.1", "--model", "-m", help="OpenAI model name"),
     format: str = typer.Option("json", "--format", "-f", help="Output format: json or markdown"),
-    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write output to file"),
+    output_file: Optional[Path] = typer.Option(None, "--output-file", "-o", help="Write output to file"),
     timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
     max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
     hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
     sleep_seconds: float = typer.Option(0.7, "--sleep-seconds", help="Sleep between GitHub API calls"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
+    openai_api_key: Optional[str] = typer.Option(None, "--openai-api-key", help="OpenAI API key"),
+    github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub token"),
 ):
     """Analyze a GitHub PR and compute complexity score."""
     final_pr_url = pr_url
@@ -280,13 +283,14 @@ def analyze_pr(
         prompt_file=prompt_file,
         model=model,
         format=format,
-        out=out,
+        output_file=output_file,
         timeout=timeout,
         max_tokens=max_tokens,
         hunks_per_file=hunks_per_file,
         sleep_seconds=sleep_seconds,
         dry_run=dry_run,
-        post_comment=post_comment,
+        openai_api_key=openai_api_key,
+        github_token=github_token,
     )
 
 
