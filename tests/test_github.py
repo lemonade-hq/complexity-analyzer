@@ -2,7 +2,7 @@
 import pytest
 from datetime import datetime
 from unittest.mock import patch, Mock
-from cli.github import fetch_pr_diff, fetch_pr_metadata, GitHubAPIError, search_closed_prs
+from cli.github import fetch_pr_diff, search_closed_prs
 
 
 @patch("cli.github.httpx.Client")

@@ -1,11 +1,10 @@
 """GitHub API client for fetching PR diffs and metadata."""
-import json
 import re
 import time
 from datetime import datetime
 from typing import Dict, Any, Tuple, Optional, List
 import httpx
-from .config import validate_owner_repo, validate_pr_number, redact_secret
+from .config import validate_owner_repo, validate_pr_number
 
 
 class GitHubAPIError(Exception):
