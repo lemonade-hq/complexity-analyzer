@@ -228,12 +228,12 @@ def _analyze_pr_impl(
             typer.echo("Analyzing complexity with LLM...", err=True)
         except GitHubAPIError as e:
             if e.status_code == 404:
-                typer.echo(f"Error: PR not found or not accessible", err=True)
+                typer.echo("Error: PR not found or not accessible", err=True)
                 typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
                 if not final_github_token:
-                    typer.echo(f"  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN", err=True)
+                    typer.echo("  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN", err=True)
                 else:
-                    typer.echo(f"  Hint: Check that the PR exists and you have access to it", err=True)
+                    typer.echo("  Hint: Check that the PR exists and you have access to it", err=True)
             else:
                 typer.echo(f"GitHub API error: {e}", err=True)
             raise typer.Exit(1)
