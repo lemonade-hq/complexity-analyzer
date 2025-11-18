@@ -55,6 +55,7 @@ def _analyze_pr_impl(
     hunks_per_file: int = 2,
     sleep_seconds: float = 0.7,
     dry_run: bool = False,
+    post_comment: bool = False,
 ):
     """
     Analyze a GitHub PR and compute complexity score.
@@ -187,6 +188,25 @@ def _analyze_pr_impl(
                 indent=2,
             )
             typer.echo(json_output)
+
+        # Set GitHub Action outputs
+        if "GITHUB_OUTPUT" in os.environ:
+            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                # Score
+                f.write(f"score={output['score']}\n")
+                
+                # Explanation (handle multiline)
+                explanation = output["explanation"]
+                if "\n" in explanation:
+                    delimiter = "EOF"
+                    # Generate random delimiter to avoid conflicts? Simple EOF is usually fine for this content.
+                    f.write(f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n")
+                else:
+                    f.write(f"explanation={explanation}\n")
+                
+                # Full JSON output
+                full_output_json = json.dumps(output, ensure_ascii=False)
+                f.write(f"output={full_output_json}\n")
         
         # Write to file if requested
         if out:
@@ -217,9 +237,23 @@ def _analyze_pr_impl(
         raise typer.Exit(1)
 
 
+def get_pr_url_from_context() -> Optional[str]:
+    """Get PR URL from GitHub Actions context."""
+    event_path = os.getenv("GITHUB_EVENT_PATH")
+    if not event_path or not os.path.exists(event_path):
+        return None
+    
+    try:
+        with open(event_path, "r") as f:
+            event_data = json.load(f)
+        return event_data.get("pull_request", {}).get("html_url")
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
 @app.command(name="analyze-pr")
 def analyze_pr(
-    pr_url: str = typer.Argument(..., help="GitHub PR URL: https://github.com/<owner>/<repo>/pull/<num>"),
+    pr_url: Optional[str] = typer.Argument(None, help="GitHub PR URL. If not provided, will try to infer from GitHub Actions context."),
     prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
     model: str = typer.Option("gpt-5.1", "--model", "-m", help="OpenAI model name"),
     format: str = typer.Option("json", "--format", "-f", help="Output format: json or markdown"),
@@ -231,8 +265,18 @@ def analyze_pr(
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
 ):
     """Analyze a GitHub PR and compute complexity score."""
+    final_pr_url = pr_url
+    if not final_pr_url:
+        typer.echo("PR URL not provided, attempting to infer from GitHub Actions context...", err=True)
+        final_pr_url = get_pr_url_from_context()
+        if not final_pr_url:
+            typer.echo("Error: Could not infer PR URL from context.", err=True)
+            typer.echo("Please provide the PR URL as an argument.", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"Inferred PR URL: {final_pr_url}", err=True)
+
     _analyze_pr_impl(
-        pr_url=pr_url,
+        pr_url=final_pr_url,
         prompt_file=prompt_file,
         model=model,
         format=format,
@@ -242,6 +286,7 @@ def analyze_pr(
         hunks_per_file=hunks_per_file,
         sleep_seconds=sleep_seconds,
         dry_run=dry_run,
+        post_comment=post_comment,
     )
 
 
