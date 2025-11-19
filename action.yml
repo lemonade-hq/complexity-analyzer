@@ -51,6 +51,8 @@ outputs:
     description: 'Complexity score (1-10)'
   explanation:
     description: 'Explanation of the complexity score'
+  model:
+    description: 'Model used for analysis (e.g., gpt-4, gpt-5.1)'
   output:
     description: 'Full analysis result in JSON format'
 
