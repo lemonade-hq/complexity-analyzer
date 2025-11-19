@@ -68,6 +68,7 @@ jobs:
         run: |
           echo "Complexity Score: ${{ steps.complexity.outputs.score }}"
           echo "Explanation: ${{ steps.complexity.outputs.explanation }}"
+          echo "Model: ${{ steps.complexity.outputs.model }}"
       
       - name: Upload complexity report
         uses: actions/upload-artifact@v4
@@ -149,6 +150,7 @@ jobs:
 |--------|-------------|
 | `score` | Complexity score from 1-10 |
 | `explanation` | Detailed explanation of the complexity rating |
+| `model` | Model used for analysis (e.g., gpt-4, gpt-5.1) |
 | `output` | Full JSON output from the analyzer |
 
 ## Output Format
