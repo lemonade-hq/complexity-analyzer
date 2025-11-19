@@ -219,6 +219,9 @@ def _analyze_pr_impl(
                 full_output_json = json.dumps(output, ensure_ascii=False)
                 f.write(f"output={full_output_json}\n")
 
+                # Model used
+                f.write(f"model={output.get('model', 'unknown')}\n")
+
         # Write to file if requested
         if output_file:
             try:
