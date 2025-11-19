@@ -22,20 +22,20 @@ def fetch_pr_diff(
 ) -> str:
     """
     Fetch PR diff from GitHub API.
-    
+
     Args:
         owner: Repository owner
         repo: Repository name
         pr: PR number
         token: GitHub token (optional for public repos)
         timeout: Request timeout in seconds
-        
+
     Returns:
         Diff text as string
     """
     validate_owner_repo(owner, repo)
     validate_pr_number(pr)
-    
+
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}"
     headers = {
         "Accept": "application/vnd.github.v3.diff",
@@ -43,7 +43,7 @@ def fetch_pr_diff(
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    
+
     try:
         with httpx.Client(timeout=timeout) as client:
             response = client.get(url, headers=headers)
@@ -64,46 +64,46 @@ def fetch_pr_metadata(
 ) -> Dict[str, Any]:
     """
     Fetch PR metadata and files list from GitHub API.
-    
+
     Args:
         owner: Repository owner
         repo: Repository name
         pr: PR number
         token: GitHub token (optional for public repos)
         timeout: Request timeout in seconds
-        
+
     Returns:
         Combined metadata dict with 'files' key
     """
     validate_owner_repo(owner, repo)
     validate_pr_number(pr)
-    
+
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    
+
     # Fetch PR metadata
     pr_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}"
     # Fetch files list
     files_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}/files"
-    
+
     try:
         with httpx.Client(timeout=timeout) as client:
             # Fetch both in parallel
             pr_response = client.get(pr_url, headers=headers)
             pr_response.raise_for_status()
             meta = pr_response.json()
-            
+
             # Small delay to respect rate limits
             time.sleep(0.1)
-            
+
             files_response = client.get(files_url, headers=headers)
             files_response.raise_for_status()
             files = files_response.json()
-            
+
             meta["files"] = files
             return meta
     except httpx.HTTPStatusError as e:
@@ -121,14 +121,14 @@ def fetch_pr(
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Fetch both PR diff and metadata with rate limiting.
-    
+
     Args:
         owner: Repository owner
         repo: Repository name
         pr: PR number
         token: GitHub token (optional for public repos)
         sleep_s: Sleep between requests in seconds
-        
+
     Returns:
         Tuple of (diff_text, metadata_dict)
     """
@@ -136,8 +136,6 @@ def fetch_pr(
     time.sleep(sleep_s)
     metadata = fetch_pr_metadata(owner, repo, pr, token)
     return diff_text, metadata
-
-
 def search_closed_prs(
     org: str,
     since: datetime,
@@ -232,4 +230,3 @@ def search_closed_prs(
         raise RuntimeError(f"Failed to search PRs: {e}")
     
     return pr_urls
-

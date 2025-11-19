@@ -1,4 +1,5 @@
 """Configuration parsing and validation."""
+
 import os
 import re
 from typing import Optional
@@ -6,7 +7,7 @@ from typing import Optional
 
 def get_github_token() -> Optional[str]:
     """Get GitHub token from environment.
-    
+
     Checks GH_TOKEN first (GitHub CLI convention), then GITHUB_TOKEN.
     """
     return os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
@@ -37,4 +38,3 @@ def redact_secret(value: str, visible_chars: int = 4) -> str:
     if len(value) <= visible_chars:
         return "*" * len(value)
     return value[:visible_chars] + "*" * (len(value) - visible_chars)
-

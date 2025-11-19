@@ -1,4 +1,5 @@
 """Main CLI entry point."""
+
 import json
 import os
 import re
@@ -41,7 +42,7 @@ def load_prompt(prompt_file: Optional[Path] = None) -> str:
         if not prompt_file.exists():
             raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
         return read_text_file(prompt_file)
-    
+
     # Load default embedded prompt
     default_prompt_path = Path(__file__).parent / "prompt" / "default.txt"
     if not default_prompt_path.exists():
@@ -148,7 +149,7 @@ def _analyze_pr_impl(
 ):
     """
     Analyze a GitHub PR and compute complexity score.
-    
+
     Environment variables:
     - GH_TOKEN or GITHUB_TOKEN: GitHub API token (optional for public repos)
     - OPENAI_API_KEY: OpenAI API key (required)
@@ -158,23 +159,26 @@ def _analyze_pr_impl(
         owner, repo, pr = parse_pr_url(pr_url)
         validate_owner_repo(owner, repo)
         validate_pr_number(pr)
-        
+
         # Get credentials (arg takes precedence over env)
         final_github_token = github_token or get_github_token()
         final_openai_key = openai_api_key or get_openai_api_key()
-        
+
         if not final_openai_key:
-            typer.echo("Error: OPENAI_API_KEY environment variable or argument is required", err=True)
-            typer.echo("Set it with: export OPENAI_API_KEY='your-key' or pass --openai-api-key", err=True)
+            typer.echo(
+                "Error: OPENAI_API_KEY environment variable or argument is required", err=True
+            )
+            typer.echo(
+                "Set it with: export OPENAI_API_KEY='your-key' or pass --openai-api-key", err=True
+            )
             raise typer.Exit(1)
-        
+
         # Load prompt
         try:
             prompt_text = load_prompt(prompt_file)
         except FileNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
-        
         # Parse PR URL for display
         owner, repo, pr = parse_pr_url(pr_url)
         
@@ -182,7 +186,7 @@ def _analyze_pr_impl(
         if dry_run:
             typer.echo(f"Fetching PR {owner}/{repo}#{pr}...", err=True)
             try:
-                diff_text, meta = fetch_pr(owner, repo, pr, github_token, sleep_s=sleep_seconds)
+                diff_text, meta = fetch_pr(owner, repo, pr, final_github_token, sleep_s=sleep_seconds)
                 title = (meta.get("title") or "").strip()
                 typer.echo(f"PR: {title}", err=True)
                 typer.echo("Processing diff...", err=True)
@@ -197,7 +201,7 @@ def _analyze_pr_impl(
                 if e.status_code == 404:
                     typer.echo(f"Error: PR not found or not accessible", err=True)
                     typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
-                    if not github_token:
+                    if not final_github_token:
                         typer.echo(f"  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN environment variable", err=True)
                         typer.echo(f"  Example: export GH_TOKEN='your-token'", err=True)
                     else:
@@ -231,13 +235,17 @@ def _analyze_pr_impl(
                 typer.echo("Error: PR not found or not accessible", err=True)
                 typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
                 if not final_github_token:
-                    typer.echo("  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN", err=True)
+                    typer.echo(
+                        "  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN",
+                        err=True,
+                    )
                 else:
-                    typer.echo("  Hint: Check that the PR exists and you have access to it", err=True)
+                    typer.echo(
+                        "  Hint: Check that the PR exists and you have access to it", err=True
+                    )
             else:
                 typer.echo(f"GitHub API error: {e}", err=True)
             raise typer.Exit(1)
-
         except LLMError as e:
             typer.echo(f"LLM error: {e}", err=True)
             raise typer.Exit(1)
@@ -247,7 +255,7 @@ def _analyze_pr_impl(
         except Exception as e:
             typer.echo(f"Unexpected error: {e}", err=True)
             raise typer.Exit(1)
-        
+
         # Output
         if format == "markdown":
             md = f"""# PR Complexity Analysis
@@ -284,7 +292,7 @@ def _analyze_pr_impl(
             with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                 # Score
                 f.write(f"score={output['score']}\n")
-                
+
                 # Explanation (handle multiline)
                 explanation = output["explanation"]
                 if "\n" in explanation:
@@ -293,11 +301,11 @@ def _analyze_pr_impl(
                     f.write(f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n")
                 else:
                     f.write(f"explanation={explanation}\n")
-                
+
                 # Full JSON output
                 full_output_json = json.dumps(output, ensure_ascii=False)
                 f.write(f"output={full_output_json}\n")
-        
+
         # Write to file if requested
         if output_file:
             try:
@@ -308,12 +316,12 @@ def _analyze_pr_impl(
                 else:
                     # Relative to current directory
                     output_path = normalize_path(Path.cwd(), str(output_file))
-                
+
                 write_json_atomic(output_path, output)
                 typer.echo(f"Output written to: {output_path}", err=True)
             except Exception as e:
                 typer.echo(f"Warning: Failed to write output file: {e}", err=True)
-        
+
     except KeyboardInterrupt:
         typer.echo("\nInterrupted by user", err=True)
         raise typer.Exit(130)
@@ -322,6 +330,7 @@ def _analyze_pr_impl(
     except Exception as e:
         typer.echo(f"Unexpected error: {e}", err=True)
         import traceback
+
         if os.getenv("DEBUG"):
             typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1)
@@ -332,7 +341,7 @@ def get_pr_url_from_context() -> Optional[str]:
     event_path = os.getenv("GITHUB_EVENT_PATH")
     if not event_path or not os.path.exists(event_path):
         return None
-    
+
     try:
         with open(event_path, "r") as f:
             event_data = json.load(f)
@@ -343,15 +352,23 @@ def get_pr_url_from_context() -> Optional[str]:
 
 @app.command(name="analyze-pr")
 def analyze_pr(
-    pr_url: Optional[str] = typer.Argument(None, help="GitHub PR URL. If not provided, will try to infer from GitHub Actions context."),
-    prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
+    pr_url: Optional[str] = typer.Argument(
+        None, help="GitHub PR URL. If not provided, will try to infer from GitHub Actions context."
+    ),
+    prompt_file: Optional[Path] = typer.Option(
+        None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
+    ),
     model: str = typer.Option("gpt-5.1", "--model", "-m", help="OpenAI model name"),
     format: str = typer.Option("json", "--format", "-f", help="Output format: json or markdown"),
-    output_file: Optional[Path] = typer.Option(None, "--output-file", "-o", help="Write output to file"),
+    output_file: Optional[Path] = typer.Option(
+        None, "--output-file", "-o", help="Write output to file"
+    ),
     timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
     max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
     hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
-    sleep_seconds: float = typer.Option(0.7, "--sleep-seconds", help="Sleep between GitHub API calls"),
+    sleep_seconds: float = typer.Option(
+        0.7, "--sleep-seconds", help="Sleep between GitHub API calls"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
     openai_api_key: Optional[str] = typer.Option(None, "--openai-api-key", help="OpenAI API key"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub token"),
@@ -359,7 +376,9 @@ def analyze_pr(
     """Analyze a GitHub PR and compute complexity score."""
     final_pr_url = pr_url
     if not final_pr_url:
-        typer.echo("PR URL not provided, attempting to infer from GitHub Actions context...", err=True)
+        typer.echo(
+            "PR URL not provided, attempting to infer from GitHub Actions context...", err=True
+        )
         final_pr_url = get_pr_url_from_context()
         if not final_pr_url:
             typer.echo("Error: Could not infer PR URL from context.", err=True)
@@ -508,7 +527,7 @@ def batch_analyze(
 def main(ctx: typer.Context):
     """
     Analyze a GitHub PR and compute complexity score.
-    
+
     Environment variables:
     - GH_TOKEN or GITHUB_TOKEN: GitHub API token (optional for public repos)
     - OPENAI_API_KEY: OpenAI API key (required)
@@ -516,7 +535,7 @@ def main(ctx: typer.Context):
     # If a subcommand was invoked, let it handle things
     if ctx.invoked_subcommand is not None:
         return
-    
+
     # Otherwise, handle direct URL invocation
     # Get the first argument from ctx.args
     if not ctx.args or len(ctx.args) == 0:
@@ -524,7 +543,7 @@ def main(ctx: typer.Context):
         typer.echo("Usage: complexity-cli analyze-pr <PR_URL>", err=True)
         typer.echo("   or: complexity-cli <PR_URL>", err=True)
         raise typer.Exit(1)
-    
+
     # Check if first arg looks like a URL
     first_arg = ctx.args[0]
     if not _OWNER_REPO_RE.match(first_arg):
@@ -532,9 +551,12 @@ def main(ctx: typer.Context):
         typer.echo("Usage: complexity-cli analyze-pr <PR_URL>", err=True)
         typer.echo("   or: complexity-cli <PR_URL>", err=True)
         raise typer.Exit(1)
-    
+
     # For direct invocation, use defaults (options require analyze-pr subcommand)
-    typer.echo("Note: For options like --model, --format, etc., use 'complexity-cli analyze-pr <URL> [OPTIONS]'", err=True)
+    typer.echo(
+        "Note: For options like --model, --format, etc., use 'complexity-cli analyze-pr <URL> [OPTIONS]'",
+        err=True,
+    )
     _analyze_pr_impl(
         pr_url=first_arg,
         prompt_file=None,
@@ -551,4 +573,3 @@ def main(ctx: typer.Context):
 
 if __name__ == "__main__":
     app()
-
