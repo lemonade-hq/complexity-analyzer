@@ -1,4 +1,5 @@
 """Tests for preprocess module."""
+
 from cli.preprocess import redact, filter_file, parse_diff_sections, build_stats
 
 
@@ -59,4 +60,3 @@ def test_build_stats():
     assert stats["fileCount"] == 2
     assert "byExt" in stats
     assert "byLang" in stats
-

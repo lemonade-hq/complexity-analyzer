@@ -1,4 +1,5 @@
 """Tests for scoring module."""
+
 import pytest
 from cli.scoring import parse_complexity_response, InvalidResponseError
 
@@ -24,7 +25,7 @@ def test_parse_response_clamps_range():
     response = '{"complexity": 15, "explanation": "Test"}'
     result = parse_complexity_response(response)
     assert result["complexity"] == 10
-    
+
     response = '{"complexity": -5, "explanation": "Test"}'
     result = parse_complexity_response(response)
     assert result["complexity"] == 1
@@ -49,4 +50,3 @@ def test_parse_missing_keys():
         parse_complexity_response('{"complexity": 5}')
     with pytest.raises(InvalidResponseError):
         parse_complexity_response('{"explanation": "test"}')
-

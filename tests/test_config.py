@@ -1,4 +1,5 @@
 """Tests for config module."""
+
 import pytest
 from cli.config import validate_owner_repo, validate_pr_number
 
@@ -26,4 +27,3 @@ def test_validate_pr_number():
         validate_pr_number(0)
     with pytest.raises(ValueError):
         validate_pr_number(-1)
-

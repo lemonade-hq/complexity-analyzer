@@ -1,4 +1,5 @@
 """Diff preprocessing: redaction, filtering, chunking, and stats."""
+
 import os
 import re
 from typing import Dict, Any, List, Tuple
@@ -6,7 +7,7 @@ from typing import Dict, Any, List, Tuple
 
 # File filtering patterns
 IGNORE_EXT_RE = re.compile(
-    r"\.(?:png|jpg|jpeg|gif|webp|ico|pdf|zip|gz|bz2|xz|mp4|mov|mp3|wav|ogg|wasm|min\.js|map|lock)$",
+    r"(?:\.(?:png|jpg|jpeg|gif|webp|ico|pdf|zip|gz|bz2|xz|mp4|mov|mp3|wav|ogg|wasm|min\.js|map|lock)|package-lock\.json|pnpm-lock\.yaml)$",
     re.IGNORECASE,
 )
 IGNORE_PATH_RE = re.compile(
@@ -32,14 +33,16 @@ def redact(text: str) -> str:
     return text
 
 
-def parse_diff_sections(diff_text: str, hunks_per_file: int = DEFAULT_HUNKS_PER_FILE) -> Dict[str, List[str]]:
+def parse_diff_sections(
+    diff_text: str, hunks_per_file: int = DEFAULT_HUNKS_PER_FILE
+) -> Dict[str, List[str]]:
     """
     Parse diff into sections per file, limiting hunks per file.
-    
+
     Args:
         diff_text: Raw unified diff text
         hunks_per_file: Maximum hunks to include per file
-        
+
     Returns:
         Dict mapping filename -> list of lines
     """
@@ -47,13 +50,13 @@ def parse_diff_sections(diff_text: str, hunks_per_file: int = DEFAULT_HUNKS_PER_
     current_file: str | None = None
     current_lines: List[str] = []
     hunk_count = 0
-    
+
     for line in diff_text.splitlines():
         if line.startswith("diff --git"):
             # Save previous file
             if current_file is not None and current_lines:
                 files[current_file] = current_lines
-            
+
             # Parse new file
             parts = line.strip().split()
             if len(parts) >= 4:
@@ -81,11 +84,11 @@ def parse_diff_sections(diff_text: str, hunks_per_file: int = DEFAULT_HUNKS_PER_
                     # Header lines before first hunk
                     if line.startswith(("index ", "--- ", "+++ ")):
                         current_lines.append(line)
-    
+
     # Save last file
     if current_file is not None and current_lines:
         files[current_file] = current_lines
-    
+
     return files
 
 
@@ -108,11 +111,11 @@ def ext_from_filename(filename: str) -> str:
 def build_stats(meta: Dict[str, Any], filenames: List[str]) -> Dict[str, Any]:
     """
     Build statistics from PR metadata and selected filenames.
-    
+
     Args:
         meta: PR metadata dict from GitHub API
         filenames: List of selected filenames
-        
+
     Returns:
         Stats dict with additions, deletions, changedFiles, byExt, byLang, fileCount
     """
@@ -122,13 +125,13 @@ def build_stats(meta: Dict[str, Any], filenames: List[str]) -> Dict[str, Any]:
     if not changed_files:
         files_list = meta.get("files") or []
         changed_files = len(files_list)
-    
+
     # Count by extension
     by_ext: Dict[str, int] = {}
     for fn in filenames:
         ext = ext_from_filename(fn)
         by_ext[ext] = by_ext.get(ext, 0) + 1
-    
+
     # Map extensions to languages
     lang_map = {
         "ts": "TypeScript",
@@ -152,12 +155,12 @@ def build_stats(meta: Dict[str, Any], filenames: List[str]) -> Dict[str, Any]:
         "json": "JSON",
         "sql": "SQL",
     }
-    
+
     by_lang: Dict[str, int] = {}
     for ext, count in by_ext.items():
         lang = lang_map.get(ext or "", "Other")
         by_lang[lang] = by_lang.get(lang, 0) + count
-    
+
     return {
         "additions": additions,
         "deletions": deletions,
@@ -171,19 +174,20 @@ def build_stats(meta: Dict[str, Any], filenames: List[str]) -> Dict[str, Any]:
 def truncate_to_token_limit(text: str, max_tokens: int) -> Tuple[str, int]:
     """
     Truncate text to at most max_tokens using tiktoken.
-    
+
     Args:
         text: Text to truncate
         max_tokens: Maximum token count
-        
+
     Returns:
         Tuple of (truncated_text, token_count)
     """
     if max_tokens <= 0:
         return "", 0
-    
+
     try:
         import tiktoken
+
         enc = tiktoken.get_encoding("cl100k_base")
         tokens = enc.encode(text, disallowed_special=())
         if len(tokens) <= max_tokens:
@@ -204,14 +208,14 @@ def make_prompt_input(
 ) -> str:
     """
     Format prompt input with PR context and diff.
-    
+
     Args:
         url: PR URL
         title: PR title
         stats: Stats dict
         files: List of changed files
         diff_excerpt: Truncated diff text
-        
+
     Returns:
         Formatted prompt input string
     """
@@ -234,22 +238,22 @@ def process_diff(
 ) -> Tuple[str, Dict[str, Any], List[str]]:
     """
     Process diff: redact, filter, chunk, truncate, and build stats.
-    
+
     Args:
         diff_text: Raw diff text
         meta: PR metadata
         max_tokens: Maximum tokens for diff excerpt
         hunks_per_file: Maximum hunks per file
-        
+
     Returns:
         Tuple of (formatted_diff_excerpt, stats_dict, selected_files_list)
     """
     # Redact secrets
     redacted_diff = redact(diff_text)
-    
+
     # Parse into sections
     sections = parse_diff_sections(redacted_diff, hunks_per_file)
-    
+
     # Filter files
     selected_files: List[str] = []
     excerpt_lines: List[str] = []
@@ -258,13 +262,12 @@ def process_diff(
             continue
         selected_files.append(fn)
         excerpt_lines.extend(lines)
-    
+
     # Combine and truncate
     excerpt = "\n".join(excerpt_lines)
     truncated, _tok = truncate_to_token_limit(excerpt, max_tokens)
-    
+
     # Build stats
     stats = build_stats(meta, selected_files)
-    
-    return truncated, stats, selected_files
 
+    return truncated, stats, selected_files
