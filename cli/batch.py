@@ -215,8 +215,8 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
         fieldnames = ["pr_url", "complexity", "explanation"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         
-        if not file_exists:
-            writer.writeheader()
+        # Always write header since we are creating a new temp file
+        writer.writeheader()
         
         # Write existing rows
         for row in existing_rows:
