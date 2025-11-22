@@ -1,6 +1,6 @@
 """Batch analysis orchestration with resume capability."""
+
 import csv
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -14,26 +14,26 @@ from .io_safety import read_text_file, normalize_path
 def load_pr_urls_from_file(file_path: Path) -> List[str]:
     """
     Load PR URLs from a text file (one URL per line).
-    
+
     Args:
         file_path: Path to file containing PR URLs
-        
+
     Returns:
         List of PR URLs
-        
+
     Raises:
         FileNotFoundError: If file doesn't exist
         ValueError: If file is empty or contains invalid URLs
     """
     if not file_path.exists():
         raise FileNotFoundError(f"Input file not found: {file_path}")
-    
+
     content = read_text_file(file_path)
     urls = [line.strip() for line in content.splitlines() if line.strip()]
-    
+
     if not urls:
         raise ValueError(f"Input file is empty: {file_path}")
-    
+
     return urls
 
 
@@ -47,10 +47,10 @@ def generate_pr_list_from_date_range(
 ) -> List[str]:
     """
     Generate PR list from date range, optionally using cache.
-    
+
     If cache_file exists and is valid, loads from cache.
     Otherwise, fetches from GitHub and saves to cache.
-    
+
     Args:
         org: Organization name
         since: Start date
@@ -58,7 +58,7 @@ def generate_pr_list_from_date_range(
         cache_file: Optional path to cache file
         github_token: GitHub token
         sleep_seconds: Sleep between API calls
-        
+
     Returns:
         List of PR URLs
     """
@@ -71,9 +71,11 @@ def generate_pr_list_from_date_range(
             return urls
         except Exception as e:
             typer.echo(f"Warning: Failed to load cache, will fetch from GitHub: {e}", err=True)
-    
+
     # Fetch from GitHub
-    typer.echo(f"Fetching closed PRs for org '{org}' from {since.date()} to {until.date()}...", err=True)
+    typer.echo(
+        f"Fetching closed PRs for org '{org}' from {since.date()} to {until.date()}...", err=True
+    )
     try:
         urls = search_closed_prs(
             org=org,
@@ -83,7 +85,7 @@ def generate_pr_list_from_date_range(
             sleep_s=sleep_seconds,
         )
         typer.echo(f"Found {len(urls)} PRs", err=True)
-        
+
         # Save to cache if specified
         if cache_file:
             try:
@@ -94,7 +96,7 @@ def generate_pr_list_from_date_range(
                 typer.echo(f"Saved PR list to cache: {cache_file}", err=True)
             except Exception as e:
                 typer.echo(f"Warning: Failed to save cache: {e}", err=True)
-        
+
         return urls
     except GitHubAPIError as e:
         typer.echo(f"Error fetching PRs: {e}", err=True)
@@ -107,23 +109,23 @@ def generate_pr_list_from_date_range(
 def load_completed_prs(output_file: Path) -> Set[str]:
     """
     Load already-completed PR URLs from existing CSV output file.
-    
+
     Args:
         output_file: Path to CSV output file
-        
+
     Returns:
         Set of PR URLs that have already been analyzed
     """
     completed: Set[str] = set()
-    
+
     if not output_file.exists():
         return completed
-    
+
     try:
         with output_file.open("r", encoding="utf-8") as f:
             # Try reading as DictReader first (with header)
             reader = csv.DictReader(f)
-            
+
             # Check if CSV has proper header
             if reader.fieldnames and "pr_url" in reader.fieldnames:
                 # Has proper header, read normally
@@ -143,16 +145,16 @@ def load_completed_prs(output_file: Path) -> Set[str]:
     except Exception as e:
         typer.echo(f"Warning: Failed to read existing output file: {e}", err=True)
         typer.echo("Will start from beginning", err=True)
-    
+
     return completed
 
 
 def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: str) -> None:
     """
     Write a single row to CSV output file atomically.
-    
+
     Creates file with header if it doesn't exist.
-    
+
     Args:
         output_file: Path to CSV output file
         pr_url: PR URL
@@ -160,19 +162,19 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
         explanation: Explanation text
     """
     file_exists = output_file.exists()
-    
+
     # Normalize path for safety
     if output_file.is_absolute():
         output_path = output_file
     else:
         output_path = normalize_path(Path.cwd(), str(output_file))
-    
+
     # Ensure parent directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Write atomically using temp file
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    
+
     # Read existing content if file exists
     existing_rows = []
     if file_exists:
@@ -180,7 +182,7 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
             with output_path.open("r", encoding="utf-8") as f:
                 # Try reading as DictReader first (with header)
                 reader = csv.DictReader(f)
-                
+
                 # Check if CSV has proper header
                 if reader.fieldnames and "pr_url" in reader.fieldnames:
                     # Has proper header, read normally
@@ -209,26 +211,28 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
             # If we can't read existing file, start fresh
             typer.echo(f"Warning: Failed to read existing CSV, will start fresh: {e}", err=True)
             file_exists = False
-    
+
     # Write all rows (existing + new) to temp file
     with tmp_path.open("w", encoding="utf-8", newline="") as f:
         fieldnames = ["pr_url", "complexity", "explanation"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        
+
         # Always write header since we are creating a new temp file
         writer.writeheader()
-        
+
         # Write existing rows
         for row in existing_rows:
             writer.writerow(row)
-        
+
         # Write new row
-        writer.writerow({
-            "pr_url": pr_url,
-            "complexity": complexity,
-            "explanation": explanation,
-        })
-    
+        writer.writerow(
+            {
+                "pr_url": pr_url,
+                "complexity": complexity,
+                "explanation": explanation,
+            }
+        )
+
     # Atomic replace
     tmp_path.replace(output_path)
 
@@ -242,7 +246,7 @@ def run_batch_analysis(
 ) -> None:
     """
     Run batch analysis with resume capability and optional multi-threading.
-    
+
     Args:
         pr_urls: List of PR URLs to analyze
         output_file: Path to CSV output file
@@ -256,41 +260,46 @@ def run_batch_analysis(
         completed = load_completed_prs(output_file)
         if completed:
             typer.echo(f"Found {len(completed)} already-completed PRs, will skip them", err=True)
-    
+
     # Filter out completed PRs
     remaining = [url for url in pr_urls if url not in completed]
     total = len(pr_urls)
     remaining_count = len(remaining)
-    
+
     if remaining_count == 0:
         typer.echo("All PRs have already been analyzed!", err=True)
         return
-    
-    typer.echo(f"Analyzing {remaining_count} PRs (out of {total} total) with {workers} worker(s)", err=True)
-    
+
+    typer.echo(
+        f"Analyzing {remaining_count} PRs (out of {total} total) with {workers} worker(s)", err=True
+    )
+
     # Track progress
     completed_count = 0
-    
+
     # Use ThreadPoolExecutor for parallel execution if workers > 1
     if workers == 1:
         # Sequential execution (original behavior)
         for idx, pr_url in enumerate(remaining, 1):
             try:
                 typer.echo(f"\n[{idx}/{remaining_count}] Analyzing {pr_url}...", err=True)
-                
+
                 result = analyze_fn(pr_url)
-                
+
                 # Extract complexity and explanation
                 complexity = result.get("score", result.get("complexity", 0))
                 explanation = result.get("explanation", "")
-                
+
                 # Write to CSV
                 write_csv_row(output_file, pr_url, complexity, explanation)
                 typer.echo(f"✓ Completed: complexity={complexity}", err=True)
                 completed_count += 1
-                
+
             except KeyboardInterrupt:
-                typer.echo(f"\n\nInterrupted. Progress saved. Resume by running the same command again.", err=True)
+                typer.echo(
+                    "\n\nInterrupted. Progress saved. Resume by running the same command again.",
+                    err=True,
+                )
                 raise typer.Exit(130)
             except Exception as e:
                 typer.echo(f"✗ Error analyzing {pr_url}: {e}", err=True)
@@ -302,40 +311,49 @@ def run_batch_analysis(
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 # Submit all tasks
                 future_to_url = {
-                    executor.submit(analyze_fn, pr_url): pr_url
-                    for pr_url in remaining
+                    executor.submit(analyze_fn, pr_url): pr_url for pr_url in remaining
                 }
-                
+
                 # Process results as they complete
                 for future in as_completed(future_to_url):
                     pr_url = future_to_url[future]
                     completed_count += 1
-                    
+
                     try:
                         result = future.result()
-                        
+
                         # Extract complexity and explanation
                         complexity = result.get("score", result.get("complexity", 0))
                         explanation = result.get("explanation", "")
-                        
+
                         # Write to CSV (on main thread to avoid race conditions)
                         write_csv_row(output_file, pr_url, complexity, explanation)
-                        typer.echo(f"\n[{completed_count}/{remaining_count}] ✓ Completed {pr_url}: complexity={complexity}", err=True)
-                        
+                        typer.echo(
+                            f"\n[{completed_count}/{remaining_count}] ✓ Completed {pr_url}: complexity={complexity}",
+                            err=True,
+                        )
+
                     except KeyboardInterrupt:
-                        typer.echo(f"\n\nInterrupted. Cancelling pending tasks...", err=True)
+                        typer.echo("\n\nInterrupted. Cancelling pending tasks...", err=True)
                         # Cancel pending futures
                         for f in future_to_url:
                             f.cancel()
-                        typer.echo("Progress saved. Resume by running the same command again.", err=True)
+                        typer.echo(
+                            "Progress saved. Resume by running the same command again.", err=True
+                        )
                         raise typer.Exit(130)
                     except Exception as e:
-                        typer.echo(f"\n[{completed_count}/{remaining_count}] ✗ Error analyzing {pr_url}: {e}", err=True)
+                        typer.echo(
+                            f"\n[{completed_count}/{remaining_count}] ✗ Error analyzing {pr_url}: {e}",
+                            err=True,
+                        )
                         typer.echo("Continuing with next PR...", err=True)
                         # Continue to next PR instead of failing
         except KeyboardInterrupt:
-            typer.echo(f"\n\nInterrupted. Progress saved. Resume by running the same command again.", err=True)
+            typer.echo(
+                "\n\nInterrupted. Progress saved. Resume by running the same command again.",
+                err=True,
+            )
             raise typer.Exit(130)
-    
-    typer.echo(f"\n✓ Batch analysis complete! Results written to: {output_file}", err=True)
 
+    typer.echo(f"\n✓ Batch analysis complete! Results written to: {output_file}", err=True)

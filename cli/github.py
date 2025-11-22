@@ -1,4 +1,5 @@
 """GitHub API client for fetching PR diffs and metadata."""
+
 import re
 import time
 from datetime import datetime
@@ -136,6 +137,8 @@ def fetch_pr(
     time.sleep(sleep_s)
     metadata = fetch_pr_metadata(owner, repo, pr, token)
     return diff_text, metadata
+
+
 def search_closed_prs(
     org: str,
     since: datetime,
@@ -146,9 +149,9 @@ def search_closed_prs(
 ) -> List[str]:
     """
     Search for closed PRs in an organization within a date range.
-    
+
     Uses GitHub Search API to find PRs closed between since and until dates.
-    
+
     Args:
         org: Organization name
         token: GitHub token (required for private repos)
@@ -156,10 +159,10 @@ def search_closed_prs(
         until: End date (inclusive)
         sleep_s: Sleep between API requests in seconds
         timeout: Request timeout in seconds
-        
+
     Returns:
         List of PR URLs (e.g., ["https://github.com/org/repo/pull/123", ...])
-        
+
     Raises:
         GitHubAPIError: If API call fails
         ValueError: If org name is invalid
@@ -168,31 +171,31 @@ def search_closed_prs(
     pattern = re.compile(r"^[A-Za-z0-9_.-]+$")
     if not pattern.match(org):
         raise ValueError(f"Invalid organization name: {org}")
-    
+
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    
+
     # Format dates for GitHub search (YYYY-MM-DD)
     since_str = since.strftime("%Y-%m-%d")
     until_str = until.strftime("%Y-%m-%d")
-    
+
     # GitHub search query: org:orgname is:pr is:closed closed:YYYY-MM-DD..YYYY-MM-DD
     query = f"org:{org} is:pr is:closed closed:{since_str}..{until_str}"
-    
+
     url = "https://api.github.com/search/issues"
     params = {"q": query, "per_page": 100, "page": 1}
-    
+
     pr_urls: List[str] = []
-    
+
     try:
         with httpx.Client(timeout=timeout) as client:
             while True:
                 response = client.get(url, headers=headers, params=params)
-                
+
                 # Check rate limit
                 if response.status_code == 403:
                     rate_limit_remaining = response.headers.get("X-RateLimit-Remaining", "0")
@@ -203,23 +206,23 @@ def search_closed_prs(
                             f"Rate limit exceeded. Reset at: {reset_time}",
                             url,
                         )
-                
+
                 response.raise_for_status()
                 data = response.json()
-                
+
                 items = data.get("items", [])
                 for item in items:
                     pr_url = item.get("html_url", "")
                     if pr_url:
                         pr_urls.append(pr_url)
-                
+
                 # Check if there are more pages
                 if len(items) < params["per_page"]:
                     break
-                
+
                 params["page"] += 1
                 time.sleep(sleep_s)
-                
+
     except httpx.HTTPStatusError as e:
         raise GitHubAPIError(
             e.response.status_code,
@@ -228,5 +231,5 @@ def search_closed_prs(
         )
     except httpx.RequestError as e:
         raise RuntimeError(f"Failed to search PRs: {e}")
-    
+
     return pr_urls

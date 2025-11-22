@@ -1,9 +1,9 @@
 """Tests for batch module."""
+
 import csv
 import pytest
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch
 from cli.batch import (
     load_pr_urls_from_file,
     generate_pr_list_from_date_range,
@@ -21,7 +21,7 @@ def test_load_pr_urls_from_file(tmp_path):
         "https://github.com/owner/repo/pull/124\n"
         "https://github.com/owner/repo/pull/125\n"
     )
-    
+
     urls = load_pr_urls_from_file(pr_file)
     assert len(urls) == 3
     assert urls[0] == "https://github.com/owner/repo/pull/123"
@@ -32,7 +32,7 @@ def test_load_pr_urls_from_file(tmp_path):
 def test_load_pr_urls_from_file_not_found(tmp_path):
     """Test loading PR URLs from non-existent file."""
     pr_file = tmp_path / "nonexistent.txt"
-    
+
     with pytest.raises(FileNotFoundError):
         load_pr_urls_from_file(pr_file)
 
@@ -41,7 +41,7 @@ def test_load_pr_urls_from_file_empty(tmp_path):
     """Test loading PR URLs from empty file."""
     pr_file = tmp_path / "empty.txt"
     pr_file.write_text("")
-    
+
     with pytest.raises(ValueError):
         load_pr_urls_from_file(pr_file)
 
@@ -51,10 +51,9 @@ def test_generate_pr_list_from_cache(mock_search, tmp_path):
     """Test generating PR list from cache file."""
     cache_file = tmp_path / "cache.txt"
     cache_file.write_text(
-        "https://github.com/owner/repo/pull/123\n"
-        "https://github.com/owner/repo/pull/124\n"
+        "https://github.com/owner/repo/pull/123\n" "https://github.com/owner/repo/pull/124\n"
     )
-    
+
     urls = generate_pr_list_from_date_range(
         org="testorg",
         since=datetime(2024, 1, 1),
@@ -62,7 +61,7 @@ def test_generate_pr_list_from_cache(mock_search, tmp_path):
         cache_file=cache_file,
         github_token="token",
     )
-    
+
     assert len(urls) == 2
     mock_search.assert_not_called()
 
@@ -74,9 +73,9 @@ def test_generate_pr_list_from_github(mock_search, tmp_path):
         "https://github.com/owner/repo/pull/123",
         "https://github.com/owner/repo/pull/124",
     ]
-    
+
     cache_file = tmp_path / "cache.txt"
-    
+
     urls = generate_pr_list_from_date_range(
         org="testorg",
         since=datetime(2024, 1, 1),
@@ -84,7 +83,7 @@ def test_generate_pr_list_from_github(mock_search, tmp_path):
         cache_file=cache_file,
         github_token="token",
     )
-    
+
     assert len(urls) == 2
     mock_search.assert_called_once()
     assert cache_file.exists()
@@ -99,7 +98,7 @@ def test_load_completed_prs(tmp_path):
         "https://github.com/owner/repo/pull/123,5,Test explanation\n"
         "https://github.com/owner/repo/pull/124,3,Another explanation\n"
     )
-    
+
     completed = load_completed_prs(csv_file)
     assert len(completed) == 2
     assert "https://github.com/owner/repo/pull/123" in completed
@@ -109,7 +108,7 @@ def test_load_completed_prs(tmp_path):
 def test_load_completed_prs_not_exists(tmp_path):
     """Test loading completed PRs from non-existent file."""
     csv_file = tmp_path / "nonexistent.csv"
-    
+
     completed = load_completed_prs(csv_file)
     assert len(completed) == 0
 
@@ -117,9 +116,9 @@ def test_load_completed_prs_not_exists(tmp_path):
 def test_write_csv_row_new_file(tmp_path):
     """Test writing CSV row to new file."""
     csv_file = tmp_path / "results.csv"
-    
+
     write_csv_row(csv_file, "https://github.com/owner/repo/pull/123", 5, "Test explanation")
-    
+
     assert csv_file.exists()
     with csv_file.open("r") as f:
         reader = csv.DictReader(f)
@@ -137,9 +136,9 @@ def test_write_csv_row_existing_file(tmp_path):
         "pr_url,complexity,explanation\n"
         "https://github.com/owner/repo/pull/123,5,Test explanation\n"
     )
-    
+
     write_csv_row(csv_file, "https://github.com/owner/repo/pull/124", 3, "Another explanation")
-    
+
     with csv_file.open("r") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -152,20 +151,20 @@ def test_write_csv_row_existing_file(tmp_path):
 def test_run_batch_analysis(mock_typer, tmp_path):
     """Test running batch analysis."""
     output_file = tmp_path / "results.csv"
-    
+
     pr_urls = [
         "https://github.com/owner/repo/pull/123",
         "https://github.com/owner/repo/pull/124",
     ]
-    
+
     def analyze_fn(url):
         return {
             "score": 5,
             "explanation": f"Analysis for {url}",
         }
-    
+
     run_batch_analysis(pr_urls, output_file, analyze_fn, resume=True)
-    
+
     assert output_file.exists()
     with output_file.open("r") as f:
         reader = csv.DictReader(f)
@@ -178,17 +177,16 @@ def test_run_batch_analysis_resume(mock_typer, tmp_path):
     """Test batch analysis resume capability."""
     output_file = tmp_path / "results.csv"
     output_file.write_text(
-        "pr_url,complexity,explanation\n"
-        "https://github.com/owner/repo/pull/123,5,Already done\n"
+        "pr_url,complexity,explanation\n" "https://github.com/owner/repo/pull/123,5,Already done\n"
     )
-    
+
     pr_urls = [
         "https://github.com/owner/repo/pull/123",
         "https://github.com/owner/repo/pull/124",
     ]
-    
+
     analyze_count = 0
-    
+
     def analyze_fn(url):
         nonlocal analyze_count
         analyze_count += 1
@@ -196,9 +194,9 @@ def test_run_batch_analysis_resume(mock_typer, tmp_path):
             "score": 5,
             "explanation": f"Analysis for {url}",
         }
-    
+
     run_batch_analysis(pr_urls, output_file, analyze_fn, resume=True)
-    
+
     # Should only analyze the second PR (first is already done)
     assert analyze_count == 1
     assert output_file.exists()
@@ -206,4 +204,3 @@ def test_run_batch_analysis_resume(mock_typer, tmp_path):
         reader = csv.DictReader(f)
         rows = list(reader)
         assert len(rows) == 2
-
