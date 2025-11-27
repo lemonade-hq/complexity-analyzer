@@ -1,0 +1,81 @@
+name: 'PR Complexity Analyzer'
+description: 'Analyzes GitHub pull request complexity using LLMs'
+author: 'Complexity Analyzer'
+
+branding:
+  icon: 'trending-up'
+  color: 'blue'
+
+inputs:
+  pr-url:
+    description: 'GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)'
+    required: false
+    default: ${{ github.event.pull_request.html_url }}
+  openai-api-key:
+    description: 'OpenAI API key for LLM analysis'
+    required: true
+  github-token:
+    description: 'GitHub token for API access (defaults to GITHUB_TOKEN)'
+    required: false
+    default: ${{ github.token }}
+  model:
+    description: 'OpenAI model name'
+    required: false
+    default: 'gpt-5.1'
+  format:
+    description: 'Output format (json or markdown)'
+    required: false
+    default: 'json'
+  output-file:
+    description: 'Path to write output file (optional)'
+    required: false
+  timeout:
+    description: 'Request timeout in seconds'
+    required: false
+    default: '120'
+  max-tokens:
+    description: 'Maximum tokens for diff excerpt'
+    required: false
+    default: '50000'
+  hunks-per-file:
+    description: 'Maximum hunks per file'
+    required: false
+    default: '2'
+  sleep-seconds:
+    description: 'Sleep between GitHub API calls'
+    required: false
+    default: '0.7'
+
+outputs:
+  score:
+    description: 'Complexity score (1-10)'
+  explanation:
+    description: 'Explanation of the complexity score'
+  model:
+    description: 'Model used for analysis (e.g., gpt-4, gpt-5.1)'
+  output:
+    description: 'Full analysis result in JSON format'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - 'analyze-pr'
+    - '--openai-api-key'
+    - '${{ inputs.openai-api-key }}'
+    - '--github-token'
+    - '${{ inputs.github-token }}'
+    - '--model'
+    - '${{ inputs.model }}'
+    - '--format'
+    - '${{ inputs.format }}'
+    - '--output-file'
+    - '${{ inputs.output-file }}'
+    - '--timeout'
+    - '${{ inputs.timeout }}'
+    - '--max-tokens'
+    - '${{ inputs.max-tokens }}'
+    - '--hunks-per-file'
+    - '${{ inputs.hunks-per-file }}'
+    - '--sleep-seconds'
+    - '${{ inputs.sleep-seconds }}'

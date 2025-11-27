@@ -1,0 +1,52 @@
+name: PR Complexity Analysis
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze PR Complexity
+        id: complexity
+        uses: ./
+        with:
+          pr-url: ${{ github.event.pull_request.html_url }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: 'gpt-5.1'
+          format: 'json'
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v2
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: <!-- complexity-analyzer-report -->
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- complexity-analyzer-report -->
+            # 📊 PR Complexity Analysis
+            
+            **Complexity Score:** ${{ steps.complexity.outputs.score }}/10
+            
+            **Explanation:**
+            ${{ steps.complexity.outputs.explanation }}
+            
+            ---
+            *Analyzed by [Complexity Analyzer](https://github.com/your-org/complexity-analyzer)*
+          edit-mode: replace

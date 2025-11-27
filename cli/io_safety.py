@@ -1,4 +1,5 @@
 """Safe file I/O operations with path normalization."""
+
 import json
 from pathlib import Path
 from typing import Any
@@ -11,13 +12,13 @@ def normalize_path(base: Path, subpath: str) -> Path:
     """
     if not subpath or subpath.strip() == "":
         raise ValueError("Empty subpath is not allowed.")
-    
+
     # Resolve the base to absolute
     base_resolved = base.resolve()
-    
+
     # Join and resolve
     candidate = (base_resolved / subpath).resolve()
-    
+
     # Check that candidate is within base
     try:
         candidate.relative_to(base_resolved)
@@ -25,7 +26,7 @@ def normalize_path(base: Path, subpath: str) -> Path:
         raise ValueError(
             f"Unsafe path detected: {subpath} would escape base directory {base_resolved}"
         )
-    
+
     return candidate
 
 
@@ -42,4 +43,3 @@ def read_text_file(path: Path) -> str:
     """Read text file safely."""
     with path.open("r", encoding="utf-8") as f:
         return f.read()
-
