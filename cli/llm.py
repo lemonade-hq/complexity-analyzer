@@ -13,13 +13,13 @@ class LLMError(Exception):
 class OpenAIProvider:
     """OpenAI API provider."""
     
-    def __init__(self, api_key: str, model: str = "gpt-5.1", timeout: float = 120.0):
+    def __init__(self, api_key: str, model: str = "gpt-5.2", timeout: float = 120.0):
         """
         Initialize OpenAI provider.
         
         Args:
             api_key: OpenAI API key
-            model: Model name (e.g., "gpt-5.1", "gpt-4")
+            model: Model name (e.g., "gpt-5.2", "gpt-4")
             timeout: Request timeout in seconds
         """
         self.client = OpenAI(api_key=api_key, timeout=timeout)

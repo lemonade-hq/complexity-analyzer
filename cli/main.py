@@ -4,12 +4,12 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
 import typer
 
 from .config import get_github_token, get_openai_api_key, validate_owner_repo, validate_pr_number
-from .github import fetch_pr, GitHubAPIError
+from .github import fetch_pr, GitHubAPIError, check_rate_limit
 from .llm import OpenAIProvider, LLMError
 from .preprocess import process_diff, make_prompt_input
 from .io_safety import read_text_file, write_json_atomic, normalize_path
@@ -54,11 +54,12 @@ def analyze_pr_to_dict(
     prompt_text: str,
     github_token: Optional[str],
     openai_key: str,
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.2",
     timeout: float = 120.0,
     max_tokens: int = 50000,
     hunks_per_file: int = 2,
     sleep_seconds: float = 0.7,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> dict:
     """
     Analyze a GitHub PR and return result as dictionary.
@@ -76,6 +77,7 @@ def analyze_pr_to_dict(
         max_tokens: Maximum tokens for diff excerpt
         hunks_per_file: Maximum hunks per file
         sleep_seconds: Sleep between GitHub API calls
+        progress_callback: Optional callback for progress messages (e.g., rate limit warnings)
         
     Returns:
         Dict with keys: score, explanation, provider, model, tokens, timestamp,
@@ -93,7 +95,9 @@ def analyze_pr_to_dict(
     validate_pr_number(pr)
     
     # Fetch PR
-    diff_text, meta = fetch_pr(owner, repo, pr, github_token, sleep_s=sleep_seconds)
+    diff_text, meta = fetch_pr(
+        owner, repo, pr, github_token, sleep_s=sleep_seconds, progress_callback=progress_callback
+    )
     
     title = (meta.get("title") or "").strip()
     
@@ -134,7 +138,7 @@ def analyze_pr_to_dict(
 def _analyze_pr_impl(
     pr_url: str,
     prompt_file: Optional[Path] = None,
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.2",
     format: str = "json",
     out: Optional[Path] = None,
     timeout: float = 120.0,
@@ -309,7 +313,7 @@ def _analyze_pr_impl(
 def analyze_pr(
     pr_url: str = typer.Argument(..., help="GitHub PR URL: https://github.com/<owner>/<repo>/pull/<num>"),
     prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
-    model: str = typer.Option("gpt-5.1", "--model", "-m", help="OpenAI model name"),
+    model: str = typer.Option("gpt-5.2", "--model", "-m", help="OpenAI model name"),
     format: str = typer.Option("json", "--format", "-f", help="Output format: json or markdown"),
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write output to file"),
     timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
@@ -342,13 +346,13 @@ def batch_analyze(
     output_file: Path = typer.Option(..., "--output", "-o", help="Output CSV file path"),
     cache_file: Optional[Path] = typer.Option(None, "--cache", help="Cache file for PR list (used with date range)"),
     prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
-    model: str = typer.Option("gpt-5.1", "--model", "-m", help="OpenAI model name"),
+    model: str = typer.Option("gpt-5.2", "--model", "-m", help="OpenAI model name"),
     timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
     max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
     hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
     sleep_seconds: float = typer.Option(0.7, "--sleep-seconds", help="Sleep between GitHub API calls"),
     resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from existing output file"),
-    workers: int = typer.Option(4, "--workers", "-w", help="Number of parallel workers for concurrent analysis (default: 4)"),
+    workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel workers (default: 1 = sequential)"),
 ):
     """
     Batch analyze multiple PRs from a file or date range.
@@ -358,7 +362,8 @@ def batch_analyze(
     Output is written to CSV with columns: pr_url, complexity, explanation.
     If interrupted, run the same command again to resume from where it stopped.
     
-    Results are written as soon as each analyzer finishes (order may differ from input).
+    Use --workers to enable parallel processing (e.g., --workers 5 for 5 parallel workers).
+    Note: Parallel processing may hit rate limits faster; adjust --sleep-seconds if needed.
     """
     try:
         # Validate inputs
@@ -378,6 +383,11 @@ def batch_analyze(
             typer.echo("Error: OPENAI_API_KEY environment variable is required", err=True)
             typer.echo("Set it with: export OPENAI_API_KEY='your-key'", err=True)
             raise typer.Exit(1)
+        
+        # Warn if GitHub token is missing (needed for private repos)
+        if not github_token:
+            typer.echo("Warning: GH_TOKEN or GITHUB_TOKEN not set. Private repos may fail with 404 errors.", err=True)
+            typer.echo("Set it with: export GH_TOKEN='your-token' or export GITHUB_TOKEN='your-token'", err=True)
         
         # Load prompt
         try:
@@ -412,7 +422,11 @@ def batch_analyze(
                 sleep_seconds=sleep_seconds,
             )
         
-        # Create analyzer function
+        # Create analyzer function with progress callback
+        def progress_msg(msg: str) -> None:
+            """Display progress messages."""
+            typer.echo(msg, err=True)
+        
         def analyze_fn(pr_url: str) -> dict:
             """Wrapper for analyze_pr_to_dict that handles errors."""
             return analyze_pr_to_dict(
@@ -425,11 +439,12 @@ def batch_analyze(
                 max_tokens=max_tokens,
                 hunks_per_file=hunks_per_file,
                 sleep_seconds=sleep_seconds,
+                progress_callback=progress_msg,
             )
         
-        # Validate workers parameter
+        # Validate workers
         if workers < 1:
-            typer.echo("Error: --workers must be at least 1", err=True)
+            typer.echo("Error: --workers must be >= 1", err=True)
             raise typer.Exit(1)
         
         # Run batch analysis
@@ -446,6 +461,61 @@ def batch_analyze(
         raise typer.Exit(130)
     except typer.Exit:
         raise
+    except Exception as e:
+        typer.echo(f"Unexpected error: {e}", err=True)
+        import traceback
+        if os.getenv("DEBUG"):
+            typer.echo(traceback.format_exc(), err=True)
+        raise typer.Exit(1)
+
+
+@app.command(name="rate-limit")
+def rate_limit(
+    format: str = typer.Option("json", "--format", "-f", help="Output format: json or human"),
+):
+    """
+    Check GitHub API rate limit status.
+    
+    Shows the current rate limit status for both core API and search API endpoints.
+    """
+    try:
+        github_token = get_github_token()
+        
+        rate_limit_info = check_rate_limit(token=github_token)
+        
+        if format == "human":
+            core = rate_limit_info["core"]
+            search = rate_limit_info["search"]
+            
+            # Format reset time
+            from datetime import datetime
+            core_reset = datetime.fromtimestamp(core["reset"]) if core["reset"] else None
+            search_reset = datetime.fromtimestamp(search["reset"]) if search["reset"] else None
+            
+            typer.echo("GitHub API Rate Limits:", err=False)
+            typer.echo("", err=False)
+            typer.echo("Core API:", err=False)
+            typer.echo(f"  Limit: {core['limit']}", err=False)
+            typer.echo(f"  Remaining: {core['remaining']}", err=False)
+            typer.echo(f"  Used: {core['used']}", err=False)
+            if core_reset:
+                typer.echo(f"  Resets at: {core_reset.strftime('%Y-%m-%d %H:%M:%S UTC')}", err=False)
+            
+            typer.echo("", err=False)
+            typer.echo("Search API:", err=False)
+            typer.echo(f"  Limit: {search['limit']}", err=False)
+            typer.echo(f"  Remaining: {search['remaining']}", err=False)
+            typer.echo(f"  Used: {search['used']}", err=False)
+            if search_reset:
+                typer.echo(f"  Resets at: {search_reset.strftime('%Y-%m-%d %H:%M:%S UTC')}", err=False)
+        else:
+            # JSON output
+            json_output = json.dumps(rate_limit_info, indent=2)
+            typer.echo(json_output)
+            
+    except GitHubAPIError as e:
+        typer.echo(f"GitHub API error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:
         typer.echo(f"Unexpected error: {e}", err=True)
         import traceback
@@ -488,7 +558,7 @@ def main(ctx: typer.Context):
     _analyze_pr_impl(
         pr_url=first_arg,
         prompt_file=None,
-        model="gpt-5.1",
+        model="gpt-5.2",
         format="json",
         out=None,
         timeout=120.0,
