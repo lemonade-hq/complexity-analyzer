@@ -24,7 +24,7 @@ complexity-cli analyze-pr "https://github.com/owner/repo/pull/123"
 ### Options
 
 - `--prompt-file`, `-p`: Path to custom prompt file (default: embedded prompt)
-- `--model`, `-m`: OpenAI model name (default: `gpt-5.1`)
+- `--model`, `-m`: OpenAI model name (default: `gpt-5.2`)
 - `--format`, `-f`: Output format: `json` or `markdown` (default: `json`)
 - `--out`, `-o`: Write output to file
 - `--timeout`, `-t`: Request timeout in seconds (default: 120)
@@ -119,7 +119,7 @@ complexity-cli batch-analyze --input-file prs.txt --output results.csv
 - `--output`, `-o`: Output CSV file path (required)
 - `--cache`: Cache file for PR list (used with date range to avoid re-fetching)
 - `--prompt-file`, `-p`: Path to custom prompt file
-- `--model`, `-m`: OpenAI model name (default: `gpt-5.1`)
+- `--model`, `-m`: OpenAI model name (default: `gpt-5.2`)
 - `--timeout`, `-t`: Request timeout in seconds (default: 120)
 - `--max-tokens`: Maximum tokens for diff excerpt (default: 50000)
 - `--hunks-per-file`: Maximum hunks per file (default: 2)

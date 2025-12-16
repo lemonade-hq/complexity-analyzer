@@ -1,11 +1,14 @@
 """Batch analysis orchestration with resume capability."""
 import csv
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Set, Optional, Dict, Any, Callable
+from typing import List, Set, Optional, Dict, Any, Callable, Tuple
+import threading
 import typer
+import httpx
 
 from .github import search_closed_prs, GitHubAPIError
 from .io_safety import read_text_file, normalize_path
@@ -50,6 +53,7 @@ def generate_pr_list_from_date_range(
     
     If cache_file exists and is valid, loads from cache.
     Otherwise, fetches from GitHub and saves to cache.
+    Automatically splits date range if it exceeds GitHub's 1000 result limit.
     
     Args:
         org: Organization name
@@ -74,34 +78,134 @@ def generate_pr_list_from_date_range(
     
     # Fetch from GitHub
     typer.echo(f"Fetching closed PRs for org '{org}' from {since.date()} to {until.date()}...", err=True)
+    cache_file_handle = None
     try:
-        urls = search_closed_prs(
-            org=org,
-            since=since,
-            until=until,
-            token=github_token,
-            sleep_s=sleep_seconds,
-        )
-        typer.echo(f"Found {len(urls)} PRs", err=True)
-        
-        # Save to cache if specified
+        # Open cache file for writing if specified
         if cache_file:
             try:
                 cache_file.parent.mkdir(parents=True, exist_ok=True)
-                with cache_file.open("w", encoding="utf-8") as f:
-                    for url in urls:
-                        f.write(f"{url}\n")
-                typer.echo(f"Saved PR list to cache: {cache_file}", err=True)
+                cache_file_handle = cache_file.open("w", encoding="utf-8")
+                typer.echo(f"Writing PRs to cache file: {cache_file}", err=True)
             except Exception as e:
-                typer.echo(f"Warning: Failed to save cache: {e}", err=True)
+                typer.echo(f"Warning: Failed to open cache file for writing: {e}", err=True)
+                cache_file = None
         
-        return urls
+        # Define callback to write PRs incrementally
+        def write_pr_to_cache(pr_url: str) -> None:
+            """Write PR URL to cache file immediately."""
+            if cache_file_handle:
+                try:
+                    cache_file_handle.write(f"{pr_url}\n")
+                    cache_file_handle.flush()  # Ensure it's written to disk immediately
+                except Exception as e:
+                    typer.echo(f"Warning: Failed to write PR to cache: {e}", err=True)
+        
+        # Progress callback for rate limit messages
+        def progress_msg(msg: str) -> None:
+            """Display progress messages."""
+            typer.echo(msg, err=True)
+        
+        # Try fetching with the full date range first
+        with httpx.Client(timeout=60.0) as client:
+            try:
+                urls = search_closed_prs(
+                    org=org,
+                    since=since,
+                    until=until,
+                    token=github_token,
+                    sleep_s=sleep_seconds,
+                    on_pr_found=write_pr_to_cache if cache_file else None,
+                    progress_callback=progress_msg,
+                    client=client,
+                )
+                typer.echo(f"Found {len(urls)} PRs", err=True)
+                return urls
+            except GitHubAPIError as e:
+                # Check if it's the 1000 result limit error
+                if e.status_code == 422 and "1000 search results" in str(e.message).lower():
+                    typer.echo(f"Date range exceeds GitHub's 1000 result limit. Splitting into smaller ranges...", err=True)
+                    
+                    # Calculate date range in days
+                    date_range_days = (until - since).days + 1
+                    
+                    # Start with splitting into halves, but ensure minimum chunk size
+                    # Try splitting into progressively smaller chunks
+                    chunk_days = max(1, date_range_days // 2)
+                    
+                    all_urls = []
+                    current_since = since
+                    chunk_num = 1
+                    initial_chunk_days = chunk_days
+                    
+                    while current_since <= until:
+                        # Calculate chunk end date
+                        chunk_until = min(current_since + timedelta(days=chunk_days - 1), until)
+                        
+                        typer.echo(f"Fetching chunk {chunk_num}: {current_since.date()} to {chunk_until.date()}...", err=True)
+                        
+                        try:
+                            chunk_urls = search_closed_prs(
+                                org=org,
+                                since=current_since,
+                                until=chunk_until,
+                                token=github_token,
+                                sleep_s=sleep_seconds,
+                                on_pr_found=write_pr_to_cache if cache_file else None,
+                                progress_callback=progress_msg,
+                                client=client,
+                            )
+                            all_urls.extend(chunk_urls)
+                            typer.echo(f"Found {len(chunk_urls)} PRs in chunk {chunk_num}", err=True)
+                            
+                            # Success - move to next chunk
+                            current_since = chunk_until + timedelta(days=1)
+                            chunk_num += 1
+                            # Reset chunk_days to initial value for next chunks
+                            chunk_days = initial_chunk_days
+                            
+                        except GitHubAPIError as chunk_error:
+                            if chunk_error.status_code == 422 and "1000 search results" in str(chunk_error.message).lower():
+                                # Still hitting limit, need smaller chunks
+                                if chunk_days <= 1:
+                                    # Can't split further - this is a very active org
+                                    typer.echo(f"Error: Even single-day chunks exceed 1000 PRs. Consider using repository-specific queries.", err=True)
+                                    raise typer.Exit(1)
+                                
+                                # Reduce chunk size and retry this chunk (don't advance current_since)
+                                chunk_days = max(1, chunk_days // 2)
+                                typer.echo(f"Chunk still too large. Reducing to {chunk_days} days and retrying...", err=True)
+                                # Update initial_chunk_days so future chunks also use smaller size
+                                initial_chunk_days = chunk_days
+                                continue
+                            else:
+                                # Other error, re-raise
+                                raise
+                        
+                        # Small delay between chunks
+                        if current_since <= until:
+                            time.sleep(sleep_seconds)
+                    
+                    typer.echo(f"Found {len(all_urls)} total PRs across {chunk_num - 1} chunks", err=True)
+                    return all_urls
+                else:
+                    # Other GitHub API error, re-raise
+                    raise
+        
     except GitHubAPIError as e:
         typer.echo(f"Error fetching PRs: {e}", err=True)
         raise typer.Exit(1)
     except Exception as e:
         typer.echo(f"Unexpected error fetching PRs: {e}", err=True)
         raise typer.Exit(1)
+    finally:
+        # Close cache file if opened (ensure it's closed even if there's an error)
+        if cache_file_handle:
+            try:
+                cache_file_handle.close()
+                if cache_file:
+                    typer.echo(f"Saved PR list to cache: {cache_file}", err=True)
+            except Exception as e:
+                typer.echo(f"Warning: Failed to close cache file: {e}", err=True)
 
 
 def load_completed_prs(output_file: Path) -> Set[str]:
@@ -121,25 +225,14 @@ def load_completed_prs(output_file: Path) -> Set[str]:
     
     try:
         with output_file.open("r", encoding="utf-8") as f:
-            # Try reading as DictReader first (with header)
             reader = csv.DictReader(f)
-            
-            # Check if CSV has proper header
-            if reader.fieldnames and "pr_url" in reader.fieldnames:
-                # Has proper header, read normally
+            # Check if CSV has the expected columns
+            if "pr_url" in reader.fieldnames or reader.fieldnames:
                 for row in reader:
-                    pr_url = row.get("pr_url", "").strip()
+                    # Handle both possible column names
+                    pr_url = row.get("pr_url") or row.get("PR link") or row.get(list(row.keys())[0] if row else "")
                     if pr_url:
-                        completed.add(pr_url)
-            else:
-                # No header or wrong header, read as simple CSV (pr_url is first column)
-                f.seek(0)  # Reset to beginning
-                reader = csv.reader(f)
-                for row in reader:
-                    if row and len(row) > 0:
-                        pr_url = row[0].strip()
-                        if pr_url and pr_url.startswith("http"):
-                            completed.add(pr_url)
+                        completed.add(pr_url.strip())
     except Exception as e:
         typer.echo(f"Warning: Failed to read existing output file: {e}", err=True)
         typer.echo("Will start from beginning", err=True)
@@ -175,39 +268,80 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
     
     # Read existing content if file exists
     existing_rows = []
+    has_header = False
     if file_exists:
         try:
             with output_path.open("r", encoding="utf-8") as f:
-                # Try reading as DictReader first (with header)
-                reader = csv.DictReader(f)
+                # Try to detect if file has headers by reading first line
+                first_line = f.readline()
+                f.seek(0)  # Reset to beginning
                 
-                # Check if CSV has proper header
-                if reader.fieldnames and "pr_url" in reader.fieldnames:
-                    # Has proper header, read normally
+                # Check if first line looks like headers (contains expected field names)
+                first_line_lower = first_line.lower().strip()
+                has_header = (
+                    "pr_url" in first_line_lower or 
+                    "pr link" in first_line_lower or
+                    "complexity" in first_line_lower
+                )
+                
+                if has_header:
+                    # File has headers, use DictReader
+                    reader = csv.DictReader(f)
+                    # Map various possible column names to our standard fieldnames
                     for row in reader:
-                        filtered_row = {
-                            "pr_url": row.get("pr_url", "").strip(),
-                            "complexity": row.get("complexity", "").strip(),
-                            "explanation": row.get("explanation", "").strip(),
-                        }
-                        if filtered_row["pr_url"]:
-                            existing_rows.append(filtered_row)
+                        mapped_row = {}
+                        # Try to find pr_url column (handle various names)
+                        pr_url_val = (
+                            row.get("pr_url") or 
+                            row.get("PR link") or 
+                            row.get("pr link") or
+                            row.get(list(row.keys())[0] if row else "")
+                        )
+                        mapped_row["pr_url"] = pr_url_val or ""
+                        
+                        # Try to find complexity column
+                        complexity_val = (
+                            row.get("complexity") or 
+                            row.get("Complexity") or
+                            row.get(list(row.keys())[1] if len(row.keys()) > 1 else "")
+                        )
+                        mapped_row["complexity"] = complexity_val or ""
+                        
+                        # Try to find explanation column
+                        explanation_val = (
+                            row.get("explanation") or 
+                            row.get("Explanation") or
+                            row.get(list(row.keys())[2] if len(row.keys()) > 2 else "")
+                        )
+                        mapped_row["explanation"] = explanation_val or ""
+                        
+                        existing_rows.append(mapped_row)
                 else:
-                    # No header or wrong header, read as simple CSV
-                    f.seek(0)  # Reset to beginning
+                    # File doesn't have headers, use regular reader and map columns
                     reader = csv.reader(f)
                     for row in reader:
-                        if row and len(row) >= 3:
-                            filtered_row = {
+                        if len(row) >= 3:
+                            existing_rows.append({
                                 "pr_url": row[0].strip(),
                                 "complexity": row[1].strip(),
                                 "explanation": row[2].strip(),
-                            }
-                            if filtered_row["pr_url"] and filtered_row["pr_url"].startswith("http"):
-                                existing_rows.append(filtered_row)
-        except Exception as e:
+                            })
+                        elif len(row) >= 2:
+                            # Handle case with just URL and complexity
+                            existing_rows.append({
+                                "pr_url": row[0].strip(),
+                                "complexity": row[1].strip(),
+                                "explanation": "",
+                            })
+                        elif len(row) >= 1:
+                            # Handle case with just URL
+                            existing_rows.append({
+                                "pr_url": row[0].strip(),
+                                "complexity": "",
+                                "explanation": "",
+                            })
+        except Exception:
             # If we can't read existing file, start fresh
-            typer.echo(f"Warning: Failed to read existing CSV, will start fresh: {e}", err=True)
             file_exists = False
     
     # Write all rows (existing + new) to temp file
@@ -215,8 +349,8 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
         fieldnames = ["pr_url", "complexity", "explanation"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         
-        if not file_exists:
-            writer.writeheader()
+        # Always write header (even if file existed, we're standardizing the format)
+        writer.writeheader()
         
         # Write existing rows
         for row in existing_rows:
@@ -241,14 +375,14 @@ def run_batch_analysis(
     workers: int = 1,
 ) -> None:
     """
-    Run batch analysis with resume capability and optional multi-threading.
+    Run batch analysis with resume capability and optional parallel processing.
     
     Args:
         pr_urls: List of PR URLs to analyze
         output_file: Path to CSV output file
         analyze_fn: Function that takes pr_url and returns dict with 'score' and 'explanation'
         resume: If True, skip already-completed PRs
-        workers: Number of parallel workers (default: 1 for sequential execution)
+        workers: Number of parallel workers (1 = sequential, >1 = parallel)
     """
     # Load completed PRs if resuming
     completed = set()
@@ -266,73 +400,94 @@ def run_batch_analysis(
         typer.echo("All PRs have already been analyzed!", err=True)
         return
     
-    typer.echo(f"Analyzing {remaining_count} PRs (out of {total} total) with {workers} worker(s)", err=True)
+    if workers > 1:
+        typer.echo(f"Analyzing {remaining_count} PRs (out of {total} total) with {workers} parallel workers", err=True)
+    else:
+        typer.echo(f"Analyzing {remaining_count} PRs (out of {total} total)", err=True)
     
-    # Track progress
-    completed_count = 0
+    # Thread-safe counter and lock for CSV writing
+    completed_lock = threading.Lock()
+    completed_count = [0]  # Use list to allow modification in nested function
     
-    # Use ThreadPoolExecutor for parallel execution if workers > 1
+    def process_single_pr(pr_url: str, idx: int) -> Tuple[str, Optional[int], Optional[str], Optional[Exception]]:
+        """Process a single PR and return result or error."""
+        try:
+            if workers == 1:
+                typer.echo(f"\n[{idx}/{remaining_count}] Analyzing {pr_url}...", err=True)
+            else:
+                typer.echo(f"[{idx}/{remaining_count}] Analyzing {pr_url}...", err=True)
+            
+            result = analyze_fn(pr_url)
+            
+            # Extract complexity and explanation
+            complexity = result.get("score", result.get("complexity", 0))
+            explanation = result.get("explanation", "")
+            
+            return pr_url, complexity, explanation, None
+        except Exception as e:
+            return pr_url, None, None, e
+    
+    # Process PRs sequentially or in parallel
     if workers == 1:
-        # Sequential execution (original behavior)
+        # Sequential processing (original behavior)
         for idx, pr_url in enumerate(remaining, 1):
             try:
-                typer.echo(f"\n[{idx}/{remaining_count}] Analyzing {pr_url}...", err=True)
+                pr_url_result, complexity, explanation, error = process_single_pr(pr_url, idx)
                 
-                result = analyze_fn(pr_url)
-                
-                # Extract complexity and explanation
-                complexity = result.get("score", result.get("complexity", 0))
-                explanation = result.get("explanation", "")
+                if error:
+                    # Handle 404 errors (PR not found) with a clearer message
+                    if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                        typer.echo(f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)", err=True)
+                        typer.echo("  This may be a private repo - ensure GH_TOKEN or GITHUB_TOKEN is set with proper access", err=True)
+                    else:
+                        typer.echo(f"✗ Error analyzing {pr_url_result}: {error}", err=True)
+                    typer.echo("Continuing with next PR...", err=True)
+                    continue
                 
                 # Write to CSV
-                write_csv_row(output_file, pr_url, complexity, explanation)
+                write_csv_row(output_file, pr_url_result, complexity, explanation)
                 typer.echo(f"✓ Completed: complexity={complexity}", err=True)
-                completed_count += 1
                 
             except KeyboardInterrupt:
                 typer.echo(f"\n\nInterrupted. Progress saved. Resume by running the same command again.", err=True)
                 raise typer.Exit(130)
-            except Exception as e:
-                typer.echo(f"✗ Error analyzing {pr_url}: {e}", err=True)
-                typer.echo("Continuing with next PR...", err=True)
-                # Continue to next PR instead of failing
     else:
-        # Parallel execution with ThreadPoolExecutor
+        # Parallel processing
         try:
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 # Submit all tasks
-                future_to_url = {
-                    executor.submit(analyze_fn, pr_url): pr_url
-                    for pr_url in remaining
+                future_to_pr = {
+                    executor.submit(process_single_pr, pr_url, idx): (pr_url, idx)
+                    for idx, pr_url in enumerate(remaining, 1)
                 }
                 
                 # Process results as they complete
-                for future in as_completed(future_to_url):
-                    pr_url = future_to_url[future]
-                    completed_count += 1
-                    
+                for future in as_completed(future_to_pr):
+                    pr_url, idx = future_to_pr[future]
                     try:
-                        result = future.result()
+                        pr_url_result, complexity, explanation, error = future.result()
                         
-                        # Extract complexity and explanation
-                        complexity = result.get("score", result.get("complexity", 0))
-                        explanation = result.get("explanation", "")
+                        if error:
+                            # Handle 404 errors (PR not found) with a clearer message
+                            if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                                typer.echo(f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)", err=True)
+                                typer.echo("  This may be a private repo - ensure GH_TOKEN or GITHUB_TOKEN is set with proper access", err=True)
+                            else:
+                                typer.echo(f"✗ Error analyzing {pr_url_result}: {error}", err=True)
+                            typer.echo("Continuing with next PR...", err=True)
+                            continue
                         
-                        # Write to CSV (on main thread to avoid race conditions)
-                        write_csv_row(output_file, pr_url, complexity, explanation)
-                        typer.echo(f"\n[{completed_count}/{remaining_count}] ✓ Completed {pr_url}: complexity={complexity}", err=True)
+                        # Write to CSV (atomic writes are thread-safe)
+                        write_csv_row(output_file, pr_url_result, complexity, explanation)
                         
-                    except KeyboardInterrupt:
-                        typer.echo(f"\n\nInterrupted. Cancelling pending tasks...", err=True)
-                        # Cancel pending futures
-                        for f in future_to_url:
-                            f.cancel()
-                        typer.echo("Progress saved. Resume by running the same command again.", err=True)
-                        raise typer.Exit(130)
+                        with completed_lock:
+                            completed_count[0] += 1
+                            typer.echo(f"✓ [{completed_count[0]}/{remaining_count}] Completed {pr_url_result}: complexity={complexity}", err=True)
+                            
                     except Exception as e:
-                        typer.echo(f"\n[{completed_count}/{remaining_count}] ✗ Error analyzing {pr_url}: {e}", err=True)
+                        typer.echo(f"✗ Unexpected error processing {pr_url}: {e}", err=True)
                         typer.echo("Continuing with next PR...", err=True)
-                        # Continue to next PR instead of failing
+                        
         except KeyboardInterrupt:
             typer.echo(f"\n\nInterrupted. Progress saved. Resume by running the same command again.", err=True)
             raise typer.Exit(130)
