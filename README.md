@@ -1,6 +1,6 @@
 # Complexity CLI
 
-A command-line tool to analyze GitHub pull request complexity using LLMs.
+A command-line tool to analyze GitHub pull request complexity using LLMs. Supports single PR analysis, batch processing, and automatic labeling of PRs with complexity scores.
 
 ## Installation
 
@@ -13,6 +13,15 @@ pip install -e .
 ```
 
 ## Usage
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `analyze-pr` | Analyze a single PR and output complexity score |
+| `label-pr` | Analyze a PR and apply a complexity label to it |
+| `batch-analyze` | Analyze multiple PRs (with optional labeling) |
+| `rate-limit` | Check GitHub API rate limit status |
 
 ### Basic Usage
 
@@ -57,6 +66,34 @@ complexity-cli analyze-pr "https://github.com/owner/repo/pull/123" --out result.
 complexity-cli analyze-pr "https://github.com/owner/repo/pull/123" --dry-run
 ```
 
+### Label a Single PR
+
+Analyze a PR and apply a complexity label directly to it on GitHub.
+
+```bash
+# Analyze and label a PR with default prefix "complexity:"
+complexity-cli label-pr "https://github.com/owner/repo/pull/123"
+
+# Use a custom label prefix
+complexity-cli label-pr "https://github.com/owner/repo/pull/123" --label-prefix "cx:"
+
+# Dry run - analyze but don't apply label
+complexity-cli label-pr "https://github.com/owner/repo/pull/123" --dry-run
+```
+
+This will:
+1. Analyze the PR complexity
+2. Remove any existing complexity labels (matching the prefix)
+3. Add a new label like `complexity:7`
+
+**Note:** A GitHub token with write access is required to update labels.
+
+#### Label PR Options
+
+- `--label-prefix`: Prefix for complexity labels (default: `complexity:`)
+- `--dry-run`: Analyze but don't update the label
+- All other options from `analyze-pr` are also supported
+
 ### Batch Analysis
 
 Analyze multiple PRs in batch mode with resume capability.
@@ -98,6 +135,34 @@ complexity-cli batch-analyze \
   --cache pr-list.txt
 ```
 
+#### Batch Labeling
+
+Apply complexity labels to multiple PRs instead of generating CSV output.
+
+```bash
+# Label all PRs from a file
+complexity-cli batch-analyze --input-file prs.txt --label
+
+# Label PRs closed in a date range
+complexity-cli batch-analyze \
+  --org myorg \
+  --since 2024-01-01 \
+  --until 2024-01-31 \
+  --label \
+  --workers 5
+
+# Force re-labeling PRs that already have complexity labels
+complexity-cli batch-analyze --input-file prs.txt --label --force
+
+# Custom label prefix
+complexity-cli batch-analyze --input-file prs.txt --label --label-prefix "cx:"
+```
+
+When using `--label`:
+- PRs that already have a complexity label are skipped (unless `--force` is used)
+- Labels are applied in the format `complexity:N` (customizable with `--label-prefix`)
+- No `--output` file is required
+
 #### Resume Capability
 
 If the batch analysis is interrupted (Ctrl+C), you can resume by running the same command again. The tool will automatically skip PRs that have already been analyzed by reading the existing output file.
@@ -125,7 +190,10 @@ complexity-cli batch-analyze --input-file prs.txt --output results.csv
 - `--hunks-per-file`: Maximum hunks per file (default: 2)
 - `--sleep-seconds`: Sleep between GitHub API calls (default: 0.7)
 - `--resume/--no-resume`: Enable/disable resume from existing output (default: enabled)
-- `--workers`, `-w`: Number of parallel workers for concurrent analysis (default: 4, minimum: 1)
+- `--workers`, `-w`: Number of parallel workers for concurrent analysis (default: 1, minimum: 1)
+- `--label`, `-l`: Label PRs with complexity instead of CSV output
+- `--label-prefix`: Prefix for complexity labels (default: `complexity:`, used with `--label`)
+- `--force`, `-f`: Re-analyze PRs even if they already have a complexity label
 
 **Note:** When using `--workers` > 1, results are written to the CSV file as soon as each analyzer finishes, so the output order may differ from the input order. This does not affect resume capability - the tool still correctly skips already-analyzed PRs.
 
@@ -194,6 +262,45 @@ https://github.com/owner/repo/pull/125,8,"Complex architectural changes across m
 - API keys are read from environment variables only
 - File paths are normalized to prevent directory traversal
 - Diffs are redacted to remove secrets and emails
+
+## GitHub Actions Integration
+
+### Automated Daily Labeling
+
+The repository includes a GitHub Actions workflow (`.github/workflows/daily-label.yml`) that automatically labels PRs with their complexity scores.
+
+**Features:**
+- Runs daily at 1am UTC
+- Labels all PRs closed the previous day
+- Can be manually triggered with custom date ranges
+- Skips PRs that already have complexity labels
+
+**Manual Trigger:**
+
+You can trigger the workflow manually from the GitHub Actions tab with optional parameters:
+- `since`: Start date (YYYY-MM-DD), defaults to yesterday
+- `until`: End date (YYYY-MM-DD), defaults to same as start date
+- `force`: Re-analyze PRs even if already labeled
+
+**Required Secrets:**
+- `ORG_GITHUB_TOKEN`: GitHub PAT with repo access across the organization
+- `OPENAI_API_KEY`: OpenAI API key for LLM analysis
+
+### Single PR Analysis in CI
+
+You can also use the CLI in your own workflows to analyze PRs on events like `pull_request`:
+
+```yaml
+- name: Analyze PR Complexity
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  run: |
+    pip install -e .
+    complexity-cli label-pr
+```
+
+When run in a GitHub Actions context without a PR URL argument, the CLI automatically detects the PR from the workflow event.
 
 ## Development
 
