@@ -210,7 +210,7 @@ class TestTokenRotator:
 
         # Mark both tokens with different reset times
         rotator.mark_rate_limited("token1", current_time + 120)  # 2 minutes
-        rotator.mark_rate_limited("token2", current_time + 60)   # 1 minute
+        rotator.mark_rate_limited("token2", current_time + 60)  # 1 minute
 
         # Should return the token that resets soonest (token2)
         token = rotator.get_token()

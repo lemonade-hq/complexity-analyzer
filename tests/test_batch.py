@@ -74,7 +74,9 @@ def test_generate_pr_list_from_github(mock_search, tmp_path):
         "https://github.com/owner/repo/pull/124",
     ]
 
-    def mock_search_with_callback(org, since, until, token, sleep_s, on_pr_found, progress_callback, client):
+    def mock_search_with_callback(
+        org, since, until, token, sleep_s, on_pr_found, progress_callback, client
+    ):
         """Mock that calls the on_pr_found callback for each URL."""
         for url in pr_urls:
             if on_pr_found:

@@ -4,7 +4,6 @@ import os
 import re
 from typing import Dict, Any, List, Tuple
 
-
 # File filtering patterns
 IGNORE_EXT_RE = re.compile(
     r"(?:\.(?:png|jpg|jpeg|gif|webp|ico|pdf|zip|gz|bz2|xz|mp4|mov|mp3|wav|ogg|wasm|min\.js|map|lock)|package-lock\.json|pnpm-lock\.yaml)$",

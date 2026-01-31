@@ -12,7 +12,7 @@ class LLMError(Exception):
 
 class OpenAIProvider:
     """OpenAI API provider."""
-    
+
     def __init__(self, api_key: str, model: str = "gpt-5.2", timeout: float = 120.0):
         """
         Initialize OpenAI provider.

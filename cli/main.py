@@ -13,8 +13,21 @@ import typer
 # Load environment variables from .env file
 load_dotenv()
 
-from .config import get_github_token, get_github_tokens, get_openai_api_key, validate_owner_repo, validate_pr_number  # noqa: E402
-from .github import fetch_pr, fetch_pr_with_rotation, GitHubAPIError, check_rate_limit, update_complexity_label, TokenRotator  # noqa: E402
+from .config import (
+    get_github_token,
+    get_github_tokens,
+    get_openai_api_key,
+    validate_owner_repo,
+    validate_pr_number,
+)  # noqa: E402
+from .github import (
+    fetch_pr,
+    fetch_pr_with_rotation,
+    GitHubAPIError,
+    check_rate_limit,
+    update_complexity_label,
+    TokenRotator,
+)  # noqa: E402
 from .llm import OpenAIProvider, LLMError  # noqa: E402
 from .preprocess import process_diff, make_prompt_input  # noqa: E402
 from .io_safety import read_text_file, write_json_atomic, normalize_path  # noqa: E402
@@ -103,16 +116,24 @@ def analyze_pr_to_dict(
     # Fetch PR - use token rotator if available, otherwise use single token
     if token_rotator:
         diff_text, meta = fetch_pr_with_rotation(
-            owner, repo, pr, token_rotator,
+            owner,
+            repo,
+            pr,
+            token_rotator,
             sleep_s=sleep_seconds,
             progress_callback=progress_callback,
             timeout=timeout,
         )
     else:
         diff_text, meta = fetch_pr(
-            owner, repo, pr, github_token, sleep_s=sleep_seconds, progress_callback=progress_callback
+            owner,
+            repo,
+            pr,
+            github_token,
+            sleep_s=sleep_seconds,
+            progress_callback=progress_callback,
         )
-    
+
     title = (meta.get("title") or "").strip()
 
     # Process diff
@@ -443,23 +464,42 @@ def batch_analyze(
     until: Optional[str] = typer.Option(
         None, "--until", help="End date (YYYY-MM-DD) for date range search"
     ),
-    output_file: Optional[Path] = typer.Option(None, "--output", "-o", help="Output CSV file path (required unless --label is used)"),
-    cache_file: Optional[Path] = typer.Option(None, "--cache", help="Cache file for PR list (used with date range)"),
-    prompt_file: Optional[Path] = typer.Option(None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"),
+    output_file: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Output CSV file path (required unless --label is used)"
+    ),
+    cache_file: Optional[Path] = typer.Option(
+        None, "--cache", help="Cache file for PR list (used with date range)"
+    ),
+    prompt_file: Optional[Path] = typer.Option(
+        None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
+    ),
     model: str = typer.Option("gpt-5.2", "--model", "-m", help="OpenAI model name"),
     timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
     max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
     hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
-    sleep_seconds: float = typer.Option(0.7, "--sleep-seconds", help="Sleep between GitHub API calls"),
-    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from existing output file"),
-    workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel workers (default: 1 = sequential)"),
-    label: bool = typer.Option(False, "--label", "-l", help="Label PRs with complexity instead of CSV output"),
-    label_prefix: str = typer.Option("complexity:", "--label-prefix", help="Prefix for complexity labels (used with --label)"),
-    force: bool = typer.Option(False, "--force", "-f", help="Re-analyze PRs even if they already have a complexity label"),
+    sleep_seconds: float = typer.Option(
+        0.7, "--sleep-seconds", help="Sleep between GitHub API calls"
+    ),
+    resume: bool = typer.Option(
+        True, "--resume/--no-resume", help="Resume from existing output file"
+    ),
+    workers: int = typer.Option(
+        1, "--workers", "-w", help="Number of parallel workers (default: 1 = sequential)"
+    ),
+    label: bool = typer.Option(
+        False, "--label", "-l", help="Label PRs with complexity instead of CSV output"
+    ),
+    label_prefix: str = typer.Option(
+        "complexity:", "--label-prefix", help="Prefix for complexity labels (used with --label)"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Re-analyze PRs even if they already have a complexity label"
+    ),
     github_tokens: Optional[str] = typer.Option(
-        None, "--github-tokens",
+        None,
+        "--github-tokens",
         help="Comma-separated list of GitHub tokens for rotation on rate limits. "
-             "Can also be set via GH_TOKENS or GITHUB_TOKENS environment variables."
+        "Can also be set via GH_TOKENS or GITHUB_TOKENS environment variables.",
     ),
 ):
     """
@@ -535,14 +575,23 @@ def batch_analyze(
         # GitHub token is required for labeling
         if label and not github_token:
             typer.echo("Error: GitHub token is required for labeling PRs", err=True)
-            typer.echo("Set it with: export GH_TOKEN='your-token' or export GITHUB_TOKEN='your-token'", err=True)
+            typer.echo(
+                "Set it with: export GH_TOKEN='your-token' or export GITHUB_TOKEN='your-token'",
+                err=True,
+            )
             raise typer.Exit(1)
 
         # Warn if GitHub token is missing (needed for private repos)
         if not github_token:
-            typer.echo("Warning: GH_TOKEN or GITHUB_TOKEN not set. Private repos may fail with 404 errors.", err=True)
-            typer.echo("Set it with: export GH_TOKEN='your-token' or export GITHUB_TOKEN='your-token'", err=True)
-        
+            typer.echo(
+                "Warning: GH_TOKEN or GITHUB_TOKEN not set. Private repos may fail with 404 errors.",
+                err=True,
+            )
+            typer.echo(
+                "Set it with: export GH_TOKEN='your-token' or export GITHUB_TOKEN='your-token'",
+                err=True,
+            )
+
         # Load prompt
         try:
             prompt_text = load_prompt(prompt_file)
@@ -575,7 +624,7 @@ def batch_analyze(
                 github_token=github_token,
                 sleep_seconds=sleep_seconds,
             )
-        
+
         # Create analyzer function with progress callback
         def progress_msg(msg: str) -> None:
             """Display progress messages."""
@@ -596,7 +645,7 @@ def batch_analyze(
                 progress_callback=progress_msg,
                 token_rotator=token_rotator,
             )
-        
+
         # Validate workers
         if workers < 1:
             typer.echo("Error: --workers must be >= 1", err=True)
@@ -604,7 +653,7 @@ def batch_analyze(
 
         # Run batch analysis with labeling support
         from .batch import run_batch_analysis_with_labels
-        
+
         run_batch_analysis_with_labels(
             pr_urls=pr_urls,
             output_file=output_file,
@@ -638,23 +687,24 @@ def rate_limit(
 ):
     """
     Check GitHub API rate limit status.
-    
+
     Shows the current rate limit status for both core API and search API endpoints.
     """
     try:
         github_token = get_github_token()
-        
+
         rate_limit_info = check_rate_limit(token=github_token)
-        
+
         if format == "human":
             core = rate_limit_info["core"]
             search = rate_limit_info["search"]
-            
+
             # Format reset time
             from datetime import datetime
+
             core_reset = datetime.fromtimestamp(core["reset"]) if core["reset"] else None
             search_reset = datetime.fromtimestamp(search["reset"]) if search["reset"] else None
-            
+
             typer.echo("GitHub API Rate Limits:", err=False)
             typer.echo("", err=False)
             typer.echo("Core API:", err=False)
@@ -662,26 +712,31 @@ def rate_limit(
             typer.echo(f"  Remaining: {core['remaining']}", err=False)
             typer.echo(f"  Used: {core['used']}", err=False)
             if core_reset:
-                typer.echo(f"  Resets at: {core_reset.strftime('%Y-%m-%d %H:%M:%S UTC')}", err=False)
-            
+                typer.echo(
+                    f"  Resets at: {core_reset.strftime('%Y-%m-%d %H:%M:%S UTC')}", err=False
+                )
+
             typer.echo("", err=False)
             typer.echo("Search API:", err=False)
             typer.echo(f"  Limit: {search['limit']}", err=False)
             typer.echo(f"  Remaining: {search['remaining']}", err=False)
             typer.echo(f"  Used: {search['used']}", err=False)
             if search_reset:
-                typer.echo(f"  Resets at: {search_reset.strftime('%Y-%m-%d %H:%M:%S UTC')}", err=False)
+                typer.echo(
+                    f"  Resets at: {search_reset.strftime('%Y-%m-%d %H:%M:%S UTC')}", err=False
+                )
         else:
             # JSON output
             json_output = json.dumps(rate_limit_info, indent=2)
             typer.echo(json_output)
-            
+
     except GitHubAPIError as e:
         typer.echo(f"GitHub API error: {e}", err=True)
         raise typer.Exit(1)
     except Exception as e:
         typer.echo(f"Unexpected error: {e}", err=True)
         import traceback
+
         if os.getenv("DEBUG"):
             typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1)
@@ -752,12 +807,8 @@ def label_pr(
             raise typer.Exit(1)
 
         if not final_github_token:
-            typer.echo(
-                "Error: GitHub token is required to update labels", err=True
-            )
-            typer.echo(
-                "Set it with: export GH_TOKEN='your-token' or pass --github-token", err=True
-            )
+            typer.echo("Error: GitHub token is required to update labels", err=True)
+            typer.echo("Set it with: export GH_TOKEN='your-token' or pass --github-token", err=True)
             raise typer.Exit(1)
 
         # Load prompt
@@ -846,6 +897,7 @@ def label_pr(
     except Exception as e:
         typer.echo(f"Unexpected error: {e}", err=True)
         import traceback
+
         if os.getenv("DEBUG"):
             typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1)

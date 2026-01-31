@@ -67,8 +67,7 @@ class TokenRotator:
         # Track rate limit status for each token
         # {token: {"remaining": int, "reset": int, "rate_limited_until": int}}
         self._token_status: Dict[str, Dict[str, int]] = {
-            token: {"remaining": -1, "reset": 0, "rate_limited_until": 0}
-            for token in self._tokens
+            token: {"remaining": -1, "reset": 0, "rate_limited_until": 0} for token in self._tokens
         }
 
     @property
@@ -178,7 +177,9 @@ class TokenRotator:
                     "remaining": status.get("remaining", -1),
                     "reset": status.get("reset", 0),
                     "rate_limited": rate_limited_until > current_time,
-                    "rate_limited_until": rate_limited_until if rate_limited_until > current_time else None,
+                    "rate_limited_until": (
+                        rate_limited_until if rate_limited_until > current_time else None
+                    ),
                 }
             return result
 
@@ -249,7 +250,7 @@ def wait_for_rate_limit(
 ) -> None:
     """
     Check rate limit and wait if necessary before making API requests.
-    
+
     Args:
         token: GitHub token (optional)
         api_type: Type of API to check - "core" or "search" (default: "core")
@@ -262,11 +263,11 @@ def wait_for_rate_limit(
         api_info = rate_limit_info.get(api_type, {})
         remaining = api_info.get("remaining", 0)
         reset_timestamp = api_info.get("reset", 0)
-        
+
         if remaining < min_remaining and reset_timestamp > 0:
             current_time = int(time.time())
             wait_seconds = max(0, reset_timestamp - current_time) + 1  # Add 1 second buffer
-            
+
             if wait_seconds > 0:
                 reset_time = datetime.fromtimestamp(reset_timestamp)
                 msg = (
@@ -277,8 +278,9 @@ def wait_for_rate_limit(
                     progress_callback(msg)
                 else:
                     import warnings
+
                     warnings.warn(msg)
-                
+
                 time.sleep(wait_seconds)
     except Exception:
         # If we can't check rate limit, continue anyway (don't block on rate limit check failure)
@@ -305,13 +307,13 @@ def fetch_pr_diff(
         timeout: Request timeout in seconds
         check_rate_limit_first: If True, check and wait for rate limit before making request
         progress_callback: Optional callback for progress messages
-        
+
     Returns:
         Diff text as string
     """
     validate_owner_repo(owner, repo)
     validate_pr_number(pr)
-    
+
     # Check rate limit before making request
     if check_rate_limit_first:
         wait_for_rate_limit(
@@ -321,7 +323,7 @@ def fetch_pr_diff(
             progress_callback=progress_callback,
             timeout=timeout,
         )
-    
+
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}"
     headers = {
         "Accept": "application/vnd.github.v3.diff",
@@ -365,13 +367,13 @@ def fetch_pr_metadata(
         timeout: Request timeout in seconds
         check_rate_limit_first: If True, check and wait for rate limit before making request
         progress_callback: Optional callback for progress messages
-        
+
     Returns:
         Combined metadata dict with 'files' key
     """
     validate_owner_repo(owner, repo)
     validate_pr_number(pr)
-    
+
     # Check rate limit before making request
     if check_rate_limit_first:
         wait_for_rate_limit(
@@ -381,7 +383,7 @@ def fetch_pr_metadata(
             progress_callback=progress_callback,
             timeout=timeout,
         )
-    
+
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -440,16 +442,26 @@ def fetch_pr(
         sleep_s: Sleep between requests in seconds
         check_rate_limit_first: If True, check and wait for rate limit before making requests
         progress_callback: Optional callback for progress messages
-        
+
     Returns:
         Tuple of (diff_text, metadata_dict)
     """
     diff_text = fetch_pr_diff(
-        owner, repo, pr, token, check_rate_limit_first=check_rate_limit_first, progress_callback=progress_callback
+        owner,
+        repo,
+        pr,
+        token,
+        check_rate_limit_first=check_rate_limit_first,
+        progress_callback=progress_callback,
     )
     time.sleep(sleep_s)
     metadata = fetch_pr_metadata(
-        owner, repo, pr, token, check_rate_limit_first=check_rate_limit_first, progress_callback=progress_callback
+        owner,
+        repo,
+        pr,
+        token,
+        check_rate_limit_first=check_rate_limit_first,
+        progress_callback=progress_callback,
     )
     return diff_text, metadata
 
@@ -499,7 +511,10 @@ def fetch_pr_with_rotation(
         try:
             # Fetch diff
             diff_text = fetch_pr_diff(
-                owner, repo, pr, token,
+                owner,
+                repo,
+                pr,
+                token,
                 check_rate_limit_first=False,  # We handle rate limits via rotation
                 progress_callback=progress_callback,
                 timeout=timeout,
@@ -509,7 +524,10 @@ def fetch_pr_with_rotation(
 
             # Fetch metadata
             metadata = fetch_pr_metadata(
-                owner, repo, pr, token,
+                owner,
+                repo,
+                pr,
+                token,
                 check_rate_limit_first=False,
                 progress_callback=progress_callback,
                 timeout=timeout,
@@ -522,9 +540,9 @@ def fetch_pr_with_rotation(
             if e.status_code == 403:
                 error_text = str(e.message).lower()
                 is_rate_limit = (
-                    "rate limit" in error_text or
-                    "api rate limit exceeded" in error_text or
-                    "secondary rate limit" in error_text
+                    "rate limit" in error_text
+                    or "api rate limit exceeded" in error_text
+                    or "secondary rate limit" in error_text
                 )
 
                 if is_rate_limit:
@@ -589,14 +607,14 @@ def check_rate_limit(
 ) -> Dict[str, Any]:
     """
     Check GitHub API rate limit status.
-    
+
     Args:
         token: GitHub token (optional, but authenticated requests have higher limits)
         timeout: Request timeout in seconds
-        
+
     Returns:
         Dict with rate limit information including 'limit', 'remaining', 'reset', and 'used'
-        
+
     Raises:
         GitHubAPIError: If API call fails
     """
@@ -606,19 +624,19 @@ def check_rate_limit(
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    
+
     url = "https://api.github.com/rate_limit"
-    
+
     try:
         with httpx.Client(timeout=timeout) as client:
             response = client.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()
-            
+
             # Extract core rate limit info
             core = data.get("resources", {}).get("core", {})
             search = data.get("resources", {}).get("search", {})
-            
+
             return {
                 "core": {
                     "limit": core.get("limit", 0),
@@ -772,6 +790,7 @@ def remove_pr_label(
 
     # URL-encode the label name for the path
     import urllib.parse
+
     encoded_label = urllib.parse.quote(label, safe="")
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr}/labels/{encoded_label}"
 
@@ -890,7 +909,7 @@ def search_closed_prs(
 
     Uses GitHub Search API to find PRs closed between since and until dates.
     Handles secondary rate limits with exponential backoff.
-    
+
     Args:
         org: Organization name
         token: GitHub token (required for private repos)
@@ -902,7 +921,7 @@ def search_closed_prs(
         max_retries: Maximum number of retries for rate limit errors
         progress_callback: Optional callback for progress messages (e.g., rate limit warnings)
         client: Optional httpx.Client to reuse connections
-        
+
     Returns:
         List of PR URLs (e.g., ["https://github.com/org/repo/pull/123", ...])
 
@@ -934,14 +953,14 @@ def search_closed_prs(
     # Total limit is 1000 items (will need to refine search if exceeded)
     per_page = 100
     params = {"q": query, "per_page": per_page, "page": 1}
-    
+
     pr_urls: List[str] = []
-    
+
     should_close_client = False
     if client is None:
         client = httpx.Client(timeout=timeout)
         should_close_client = True
-    
+
     try:
         # Check rate limit before starting search
         wait_for_rate_limit(
@@ -951,27 +970,27 @@ def search_closed_prs(
             progress_callback=progress_callback,
             timeout=timeout,
         )
-        
+
         while True:
             retry_count = 0
             response = None
-            
+
             # Retry loop for handling rate limits
             while retry_count < max_retries:
                 try:
                     response = client.get(url, headers=headers, params=params)
-                    
+
                     # Check for rate limit errors
                     if response.status_code == 403:
                         response_text = response.text.lower()
                         rate_limit_remaining = response.headers.get("X-RateLimit-Remaining", "0")
-                        
+
                         # Check if it's a secondary rate limit
                         is_secondary_limit = (
-                            "secondary rate limit" in response_text or
-                            "exceeded a secondary rate limit" in response_text
+                            "secondary rate limit" in response_text
+                            or "exceeded a secondary rate limit" in response_text
                         )
-                        
+
                         # Primary rate limit (X-RateLimit-Remaining = 0)
                         if rate_limit_remaining == "0" and not is_secondary_limit:
                             reset_time = response.headers.get("X-RateLimit-Reset")
@@ -986,6 +1005,7 @@ def search_closed_prs(
                                         progress_callback(msg)
                                     else:
                                         import warnings
+
                                         warnings.warn(msg)
                                     time.sleep(wait_seconds + 1)
                                     retry_count += 1
@@ -994,22 +1014,23 @@ def search_closed_prs(
                                     # Fall through to generic handling if header parsing fails
                                     pass
                             # If no reset header, fall through to generic handling
-                        
+
                         # Secondary rate limit - use shorter exponential backoff
                         # GitHub secondary limits typically resolve quickly (seconds to minutes)
                         if is_secondary_limit:
                             # Exponential backoff: 10s, 20s, 40s, 80s, 160s
-                            wait_seconds = 10 * (2 ** retry_count)
+                            wait_seconds = 10 * (2**retry_count)
                             msg = f"Secondary rate limit hit. Waiting {wait_seconds} seconds before retry {retry_count + 1}/{max_retries}..."
                             if progress_callback:
                                 progress_callback(msg)
                             else:
                                 import warnings
+
                                 warnings.warn(msg)
                             time.sleep(wait_seconds)
                             retry_count += 1
                             continue
-                        
+
                         # If we can't handle it and no more retries, raise error
                         if retry_count >= max_retries - 1:
                             raise GitHubAPIError(
@@ -1017,29 +1038,30 @@ def search_closed_prs(
                                 response.text[:500],
                                 url,
                             )
-                        
+
                         # Unknown 403 error - try shorter backoff first
                         # If it's actually a primary limit without headers, fall back to longer wait
-                        wait_seconds = 10 * (2 ** retry_count) if retry_count < 3 else 60
+                        wait_seconds = 10 * (2**retry_count) if retry_count < 3 else 60
                         msg = f"Rate limit error (403). Waiting {wait_seconds} seconds before retry {retry_count + 1}/{max_retries}..."
                         if progress_callback:
                             progress_callback(msg)
                         else:
                             import warnings
+
                             warnings.warn(msg)
                         time.sleep(wait_seconds)
                         retry_count += 1
                         continue
-                    
+
                     # Success - break out of retry loop
                     break
-                    
+
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 403 and retry_count < max_retries - 1:
                         # Will be handled in the retry loop above
                         continue
                     raise
-            
+
             # If we exhausted retries, raise error
             if retry_count >= max_retries:
                 raise GitHubAPIError(
@@ -1047,11 +1069,11 @@ def search_closed_prs(
                     f"Rate limit exceeded after {max_retries} retries",
                     url,
                 )
-            
+
             # Process successful response
             response.raise_for_status()
             data = response.json()
-            
+
             # Check total count on first page to fail fast if we exceed 1000 limit
             # This saves us from fetching 10 pages only to fail at the end
             if params["page"] == 1 and data.get("total_count", 0) > 1000:
@@ -1060,7 +1082,7 @@ def search_closed_prs(
                     "1000 search results limit exceeded (total_count > 1000)",
                     url,
                 )
-            
+
             items = data.get("items", [])
             for item in items:
                 pr_url = item.get("html_url", "")
@@ -1073,18 +1095,19 @@ def search_closed_prs(
                         except Exception as e:
                             # Log but don't fail the entire process if callback fails
                             import warnings
+
                             warnings.warn(f"Callback failed for PR {pr_url}: {e}")
-            
+
             # Check if there are more pages
             if len(items) < per_page:
                 break
-            
+
             # GitHub Search API is limited to 1000 results (10 pages of 100)
             if params["page"] >= 10:
                 break
-            
+
             params["page"] += 1
-            
+
             # Check rate limit before next request
             wait_for_rate_limit(
                 token=token,
@@ -1093,7 +1116,7 @@ def search_closed_prs(
                 progress_callback=progress_callback,
                 timeout=timeout,
             )
-            
+
             # Adaptive sleep based on rate limits
             remaining = response.headers.get("X-RateLimit-Remaining")
             if remaining and int(remaining) > 10:
@@ -1106,7 +1129,10 @@ def search_closed_prs(
         # Check for 422 error about 1000 result limit
         if e.response.status_code == 422:
             error_text = e.response.text.lower()
-            if "only the first 1000 search results" in error_text or "1000 search results" in error_text:
+            if (
+                "only the first 1000 search results" in error_text
+                or "1000 search results" in error_text
+            ):
                 # This is the 1000 result limit - we need to split the date range
                 raise GitHubAPIError(
                     422,
@@ -1123,5 +1149,5 @@ def search_closed_prs(
     finally:
         if should_close_client:
             client.close()
-    
+
     return pr_urls
