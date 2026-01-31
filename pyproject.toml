@@ -29,7 +29,6 @@ dependencies = [
     "typer>=0.9.0",
     "httpx>=0.24.0",
     "python-dotenv>=1.0.0",
-    "urllib3>=2.6.3",  # Security fix for CVE-2025-43859 and related vulnerabilities
 ]
 
 [project.optional-dependencies]
