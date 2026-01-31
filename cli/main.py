@@ -13,21 +13,21 @@ import typer
 # Load environment variables from .env file
 load_dotenv()
 
-from .config import (
+from .config import (  # noqa: E402
     get_github_token,
     get_github_tokens,
     get_openai_api_key,
     validate_owner_repo,
     validate_pr_number,
-)  # noqa: E402
-from .github import (
+)
+from .github import (  # noqa: E402
     fetch_pr,
     fetch_pr_with_rotation,
     GitHubAPIError,
     check_rate_limit,
     update_complexity_label,
     TokenRotator,
-)  # noqa: E402
+)
 from .llm import OpenAIProvider, LLMError  # noqa: E402
 from .preprocess import process_diff, make_prompt_input  # noqa: E402
 from .io_safety import read_text_file, write_json_atomic, normalize_path  # noqa: E402
