@@ -4,6 +4,8 @@ import os
 import re
 from typing import List, Optional
 
+from .constants import TOKEN_VISIBLE_CHARS
+
 
 def get_github_token() -> Optional[str]:
     """Get GitHub token from environment.
@@ -68,7 +70,7 @@ def validate_pr_number(pr: int) -> None:
         raise ValueError(f"PR number must be positive, got: {pr}")
 
 
-def redact_secret(value: str, visible_chars: int = 4) -> str:
+def redact_secret(value: str, visible_chars: int = TOKEN_VISIBLE_CHARS) -> str:
     """Redact a secret value for logging."""
     if len(value) <= visible_chars:
         return "*" * len(value)

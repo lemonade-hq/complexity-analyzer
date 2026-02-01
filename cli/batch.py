@@ -1,30 +1,29 @@
 """Batch analysis orchestration with resume capability."""
 
 import csv
-import re
+import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Set, Optional, Dict, Any, Callable, Tuple
-import threading
-import typer
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
 import httpx
+import typer
 
-from .github import search_closed_prs, GitHubAPIError, has_complexity_label, update_complexity_label
-from .io_safety import read_text_file, normalize_path
+from .constants import DEFAULT_SLEEP_SECONDS, DEFAULT_TIMEOUT
+from .github import (
+    GitHubAPIError,
+    has_complexity_label,
+    search_closed_prs,
+    update_complexity_label,
+)
+from .io_safety import normalize_path, read_text_file
+from .utils import parse_pr_url
 
-# Regex to parse PR URL
-_OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
-
-
-def parse_pr_url(url: str) -> Tuple[str, str, int]:
-    """Parse owner, repo, and PR number from GitHub PR URL."""
-    m = _OWNER_REPO_RE.match(url.strip())
-    if not m:
-        raise ValueError(f"Invalid PR URL: {url}")
-    owner, repo, pr_str = m.group(1), m.group(2), m.group(3)
-    return owner, repo, int(pr_str)
+# Get logger
+logger = logging.getLogger("complexity-cli")
 
 
 def load_pr_urls_from_file(file_path: Path) -> List[str]:
@@ -59,7 +58,7 @@ def generate_pr_list_from_date_range(
     until: datetime,
     cache_file: Optional[Path],
     github_token: Optional[str],
-    sleep_seconds: float = 0.7,
+    sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
 ) -> List[str]:
     """
     Generate PR list from date range, optionally using cache.
@@ -384,8 +383,9 @@ def write_csv_row(output_file: Path, pr_url: str, complexity: int, explanation: 
                                     "explanation": "",
                                 }
                             )
-        except Exception:
+        except (csv.Error, IOError, KeyError) as e:
             # If we can't read existing file, start fresh
+            logger.debug(f"Could not read existing CSV file: {e}")
             file_exists = False
 
     # Write all rows (existing + new) to temp file
@@ -553,8 +553,9 @@ def run_batch_analysis(
                                 err=True,
                             )
 
-                    except Exception as e:
+                    except (RuntimeError, ValueError) as e:
                         typer.echo(f"✗ Unexpected error processing {pr_url}: {e}", err=True)
+                        logger.debug(f"Thread error for {pr_url}", exc_info=True)
                         typer.echo("Continuing with next PR...", err=True)
 
         except KeyboardInterrupt:
@@ -576,7 +577,7 @@ def run_batch_analysis_with_labels(
     label_prs: bool = False,
     label_prefix: str = "complexity:",
     github_token: Optional[str] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
     force: bool = False,
 ) -> None:
     """
@@ -773,8 +774,9 @@ def run_batch_analysis_with_labels(
                                     err=True,
                                 )
 
-                    except Exception as e:
+                    except (RuntimeError, ValueError) as e:
                         typer.echo(f"✗ Unexpected error processing {pr_url}: {e}", err=True)
+                        logger.debug(f"Thread error for {pr_url}", exc_info=True)
 
         except KeyboardInterrupt:
             typer.echo(

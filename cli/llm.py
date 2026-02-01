@@ -1,19 +1,23 @@
 """LLM provider adapter with JSON schema validation and retries."""
 
 import time
-from typing import Dict, Any
+from typing import Any, Dict
+
 from openai import OpenAI
-from .scoring import parse_complexity_response, InvalidResponseError
+
+from .constants import DEFAULT_MODEL, DEFAULT_TIMEOUT
+from .llm_base import LLMProvider
+from .scoring import InvalidResponseError, parse_complexity_response
 
 
 class LLMError(Exception):
     """LLM provider error."""
 
 
-class OpenAIProvider:
-    """OpenAI API provider."""
+class OpenAIProvider(LLMProvider):
+    """OpenAI API provider implementation."""
 
-    def __init__(self, api_key: str, model: str = "gpt-5.2", timeout: float = 120.0):
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, timeout: float = DEFAULT_TIMEOUT):
         """
         Initialize OpenAI provider.
 
@@ -23,8 +27,24 @@ class OpenAIProvider:
             timeout: Request timeout in seconds
         """
         self.client = OpenAI(api_key=api_key, timeout=timeout)
-        self.model = model
+        self._model = model
         self.timeout = timeout
+
+    @property
+    def provider_name(self) -> str:
+        """Return the provider name."""
+        return "openai"
+
+    @property
+    def model_name(self) -> str:
+        """Return the model name."""
+        return self._model
+
+    # Keep backward compatibility
+    @property
+    def model(self) -> str:
+        """Return the model name (backward compatible)."""
+        return self._model
 
     def analyze_complexity(
         self,
@@ -80,8 +100,8 @@ class OpenAIProvider:
                 result = parse_complexity_response(content)
 
                 # Add metadata
-                result["provider"] = "openai"
-                result["model"] = self.model
+                result["provider"] = self.provider_name
+                result["model"] = self.model_name
                 result["tokens"] = response.usage.total_tokens if response.usage else None
 
                 return result

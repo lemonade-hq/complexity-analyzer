@@ -2,7 +2,9 @@
 
 import os
 import re
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from .constants import DEFAULT_HUNKS_PER_FILE, DEFAULT_MAX_TOKENS
 
 # File filtering patterns
 IGNORE_EXT_RE = re.compile(
@@ -14,20 +16,37 @@ IGNORE_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Redaction patterns
-SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][A-Za-z0-9_\-]{8,}['\"]"
-)
+# Redaction patterns - enhanced for better secret detection
+SECRET_PATTERNS = [
+    # Quoted secrets (original pattern)
+    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][A-Za-z0-9_\-.]{8,}['\"]"),
+    # Unquoted secrets (longer minimum to reduce false positives)
+    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*[A-Za-z0-9_\-.]{16,}"),
+    # Bearer tokens
+    re.compile(r"Bearer\s+[A-Za-z0-9_\-.]{20,}", re.IGNORECASE),
+    # AWS keys
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    # OpenAI keys
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    # GitHub tokens
+    re.compile(r"ghp_[A-Za-z0-9]{36}"),
+    # GitHub OAuth tokens
+    re.compile(r"gho_[A-Za-z0-9]{36}"),
+    # GitHub App tokens
+    re.compile(r"ghu_[A-Za-z0-9]{36}"),
+    # GitHub refresh tokens
+    re.compile(r"ghr_[A-Za-z0-9]{36}"),
+]
+# Keep original pattern for backward compatibility
+SECRET_RE = SECRET_PATTERNS[0]
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-
-# Default limits
-DEFAULT_MAX_TOKENS = 50000
-DEFAULT_HUNKS_PER_FILE = 2
 
 
 def redact(text: str) -> str:
     """Redact secrets and emails from diff text."""
-    text = SECRET_RE.sub("[REDACTED_SECRET]", text)
+    # Apply all secret patterns
+    for pattern in SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED_SECRET]", text)
     text = EMAIL_RE.sub("[REDACTED_EMAIL]", text)
     return text
 
@@ -46,7 +65,7 @@ def parse_diff_sections(
         Dict mapping filename -> list of lines
     """
     files: Dict[str, List[str]] = {}
-    current_file: str | None = None
+    current_file: Optional[str] = None
     current_lines: List[str] = []
     hunk_count = 0
 

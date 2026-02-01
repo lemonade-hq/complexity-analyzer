@@ -1,12 +1,20 @@
 """GitHub API client for fetching PR diffs and metadata."""
 
 import re
-import time
 import threading
+import time
 from datetime import datetime
-from typing import Dict, Any, Tuple, Optional, List, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import httpx
+
 from .config import validate_owner_repo, validate_pr_number
+from .constants import (
+    DEFAULT_TIMEOUT,
+    DEFAULT_SLEEP_SECONDS,
+    GITHUB_PER_PAGE,
+)
+from .utils import build_github_diff_headers, build_github_headers, redact_token
 
 
 class GitHubAPIError(Exception):
@@ -170,8 +178,8 @@ class TokenRotator:
                 status = self._token_status[token]
                 rate_limited_until = status.get("rate_limited_until", 0)
 
-                # Redact token for display (show first 4 chars only)
-                redacted = token[:4] + "..." if len(token) > 4 else "***"
+                # Redact token for display
+                redacted = redact_token(token)
 
                 result[f"token_{i+1} ({redacted})"] = {
                     "remaining": status.get("remaining", -1),
@@ -246,7 +254,7 @@ def wait_for_rate_limit(
     api_type: str = "core",
     min_remaining: int = 1,
     progress_callback: Optional[Callable[[str], None]] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> None:
     """
     Check rate limit and wait if necessary before making API requests.
@@ -282,9 +290,12 @@ def wait_for_rate_limit(
                     warnings.warn(msg)
 
                 time.sleep(wait_seconds)
-    except Exception:
+    except Exception as e:
         # If we can't check rate limit, continue anyway (don't block on rate limit check failure)
-        pass
+        # Log the error for debugging purposes
+        import logging
+
+        logging.getLogger("complexity-cli").debug(f"Rate limit check failed: {e}")
 
 
 def fetch_pr_diff(
@@ -292,7 +303,7 @@ def fetch_pr_diff(
     repo: str,
     pr: int,
     token: Optional[str] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
     check_rate_limit_first: bool = True,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> str:
@@ -325,12 +336,7 @@ def fetch_pr_diff(
         )
 
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}"
-    headers = {
-        "Accept": "application/vnd.github.v3.diff",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = build_github_diff_headers(token)
 
     try:
         with httpx.Client(timeout=timeout) as client:
@@ -352,7 +358,7 @@ def fetch_pr_metadata(
     repo: str,
     pr: int,
     token: Optional[str] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
     check_rate_limit_first: bool = True,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
@@ -384,12 +390,7 @@ def fetch_pr_metadata(
             timeout=timeout,
         )
 
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = build_github_headers(token)
 
     # Fetch PR metadata
     pr_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}"
@@ -427,7 +428,7 @@ def fetch_pr(
     repo: str,
     pr: int,
     token: Optional[str] = None,
-    sleep_s: float = 0.7,
+    sleep_s: float = DEFAULT_SLEEP_SECONDS,
     check_rate_limit_first: bool = True,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[str, Dict[str, Any]]:
@@ -471,10 +472,10 @@ def fetch_pr_with_rotation(
     repo: str,
     pr: int,
     token_rotator: TokenRotator,
-    sleep_s: float = 0.7,
+    sleep_s: float = DEFAULT_SLEEP_SECONDS,
     max_retries: int = 10,
     progress_callback: Optional[Callable[[str], None]] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Fetch PR diff and metadata with automatic token rotation on rate limits.
@@ -561,7 +562,7 @@ def fetch_pr_with_rotation(
                     token_rotator.mark_rate_limited(token, reset_timestamp)
 
                     if progress_callback:
-                        redacted = token[:4] + "..." if len(token) > 4 else "***"
+                        redacted = redact_token(token)
                         progress_callback(
                             f"Token {redacted} rate limited for {owner}/{repo}#{pr}. "
                             f"Rotating to next token (attempt {retry_count + 1}/{max_retries})..."
@@ -603,7 +604,7 @@ def fetch_pr_with_rotation(
 
 def check_rate_limit(
     token: Optional[str] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> Dict[str, Any]:
     """
     Check GitHub API rate limit status.
@@ -618,13 +619,7 @@ def check_rate_limit(
     Raises:
         GitHubAPIError: If API call fails
     """
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
+    headers = build_github_headers(token)
     url = "https://api.github.com/rate_limit"
 
     try:
@@ -666,7 +661,7 @@ def get_pr_labels(
     repo: str,
     pr: int,
     token: Optional[str] = None,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> List[str]:
     """
     Get all labels on a PR.
@@ -684,12 +679,7 @@ def get_pr_labels(
     validate_owner_repo(owner, repo)
     validate_pr_number(pr)
 
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = build_github_headers(token)
 
     # PRs use the issues endpoint for labels
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr}/labels"
@@ -716,7 +706,7 @@ def add_pr_label(
     pr: int,
     label: str,
     token: str,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> None:
     """
     Add a label to a PR.
@@ -735,12 +725,7 @@ def add_pr_label(
     if not token:
         raise ValueError("GitHub token is required to add labels")
 
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Authorization": f"Bearer {token}",
-    }
-
+    headers = build_github_headers(token)
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr}/labels"
 
     try:
@@ -763,7 +748,7 @@ def remove_pr_label(
     pr: int,
     label: str,
     token: str,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> None:
     """
     Remove a label from a PR.
@@ -782,11 +767,7 @@ def remove_pr_label(
     if not token:
         raise ValueError("GitHub token is required to remove labels")
 
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Authorization": f"Bearer {token}",
-    }
+    headers = build_github_headers(token)
 
     # URL-encode the label name for the path
     import urllib.parse
@@ -820,7 +801,7 @@ def update_complexity_label(
     complexity: int,
     token: str,
     label_prefix: str = "complexity:",
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> str:
     """
     Update the complexity label on a PR.
@@ -866,7 +847,7 @@ def has_complexity_label(
     pr: int,
     token: Optional[str] = None,
     label_prefix: str = "complexity:",
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> Optional[str]:
     """
     Check if a PR already has a complexity label.
@@ -898,7 +879,7 @@ def search_closed_prs(
     until: datetime,
     token: Optional[str] = None,
     sleep_s: float = 2.0,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_TIMEOUT,
     on_pr_found: Optional[Callable[[str], None]] = None,
     max_retries: int = 5,
     progress_callback: Optional[Callable[[str], None]] = None,
@@ -934,12 +915,7 @@ def search_closed_prs(
     if not pattern.match(org):
         raise ValueError(f"Invalid organization name: {org}")
 
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = build_github_headers(token)
 
     # Format dates for GitHub search (YYYY-MM-DD)
     since_str = since.strftime("%Y-%m-%d")
@@ -951,7 +927,7 @@ def search_closed_prs(
     url = "https://api.github.com/search/issues"
     # GitHub Search API limit is 100 items per page
     # Total limit is 1000 items (will need to refine search if exceeded)
-    per_page = 100
+    per_page = GITHUB_PER_PAGE
     params = {"q": query, "per_page": per_page, "page": 1}
 
     pr_urls: List[str] = []

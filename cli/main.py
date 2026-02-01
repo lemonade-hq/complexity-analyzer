@@ -5,14 +5,19 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional
 
-from dotenv import load_dotenv
 import typer
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+from .analyze import load_prompt  # noqa: E402
+from .batch import (  # noqa: E402
+    generate_pr_list_from_date_range,
+    load_pr_urls_from_file,
+)
 from .config import (  # noqa: E402
     get_github_token,
     get_github_tokens,
@@ -20,50 +25,36 @@ from .config import (  # noqa: E402
     validate_owner_repo,
     validate_pr_number,
 )
+from .constants import (  # noqa: E402
+    DEFAULT_HUNKS_PER_FILE,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_MODEL,
+    DEFAULT_SLEEP_SECONDS,
+    DEFAULT_TIMEOUT,
+)
+from .errors import ErrorHandler  # noqa: E402
 from .github import (  # noqa: E402
+    GitHubAPIError,
+    TokenRotator,
+    check_rate_limit,
     fetch_pr,
     fetch_pr_with_rotation,
-    GitHubAPIError,
-    check_rate_limit,
     update_complexity_label,
-    TokenRotator,
 )
-from .llm import OpenAIProvider, LLMError  # noqa: E402
-from .preprocess import process_diff, make_prompt_input  # noqa: E402
-from .io_safety import read_text_file, write_json_atomic, normalize_path  # noqa: E402
+from .io_safety import normalize_path, write_json_atomic  # noqa: E402
+from .llm import LLMError, OpenAIProvider  # noqa: E402
+from .logging_config import get_logger, setup_logging  # noqa: E402
+from .preprocess import make_prompt_input, process_diff  # noqa: E402
 from .scoring import InvalidResponseError  # noqa: E402
-from .batch import (  # noqa: E402
-    load_pr_urls_from_file,
-    generate_pr_list_from_date_range,
-)
+from .utils import parse_pr_url  # noqa: E402
 
 app = typer.Typer(help="Analyze GitHub PR complexity using LLMs")
 
-# Regex to parse PR URL
+# Initialize logger
+logger = get_logger()
+
+# Keep regex for direct URL validation in main callback
 _OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
-
-
-def parse_pr_url(url: str) -> Tuple[str, str, int]:
-    """Parse owner, repo, and PR number from GitHub PR URL."""
-    m = _OWNER_REPO_RE.match(url.strip())
-    if not m:
-        raise ValueError(f"Invalid PR URL: {url}")
-    owner, repo, pr_str = m.group(1), m.group(2), m.group(3)
-    return owner, repo, int(pr_str)
-
-
-def load_prompt(prompt_file: Optional[Path] = None) -> str:
-    """Load prompt from file or use default embedded prompt."""
-    if prompt_file:
-        if not prompt_file.exists():
-            raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
-        return read_text_file(prompt_file)
-
-    # Load default embedded prompt
-    default_prompt_path = Path(__file__).parent / "prompt" / "default.txt"
-    if not default_prompt_path.exists():
-        raise FileNotFoundError(f"Default prompt not found: {default_prompt_path}")
-    return read_text_file(default_prompt_path)
 
 
 def analyze_pr_to_dict(
@@ -71,11 +62,11 @@ def analyze_pr_to_dict(
     prompt_text: str,
     github_token: Optional[str],
     openai_key: str,
-    model: str = "gpt-5.2",
-    timeout: float = 120.0,
-    max_tokens: int = 50000,
-    hunks_per_file: int = 2,
-    sleep_seconds: float = 0.7,
+    model: str = DEFAULT_MODEL,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    hunks_per_file: int = DEFAULT_HUNKS_PER_FILE,
+    sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
     progress_callback: Optional[Callable[[str], None]] = None,
     token_rotator: Optional[TokenRotator] = None,
 ) -> dict:
@@ -173,17 +164,18 @@ def analyze_pr_to_dict(
 def _analyze_pr_impl(
     pr_url: str,
     prompt_file: Optional[Path] = None,
-    model: str = "gpt-5.2",
+    model: str = DEFAULT_MODEL,
     format: str = "json",
     output_file: Optional[Path] = None,
-    timeout: float = 120.0,
-    max_tokens: int = 50000,
-    hunks_per_file: int = 2,
-    sleep_seconds: float = 0.7,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    hunks_per_file: int = DEFAULT_HUNKS_PER_FILE,
+    sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
     dry_run: bool = False,
     post_comment: bool = False,
     openai_api_key: Optional[str] = None,
     github_token: Optional[str] = None,
+    verbose: bool = False,
 ):
     """
     Analyze a GitHub PR and compute complexity score.
@@ -192,6 +184,10 @@ def _analyze_pr_impl(
     - GH_TOKEN or GITHUB_TOKEN: GitHub API token (optional for public repos)
     - OPENAI_API_KEY: OpenAI API key (required)
     """
+    # Set up logging if verbose
+    if verbose:
+        setup_logging(verbose=True)
+
     try:
         # Parse PR URL
         owner, repo, pr = parse_pr_url(pr_url)
@@ -239,23 +235,16 @@ def _analyze_pr_impl(
                 raise typer.Exit(0)
             except GitHubAPIError as e:
                 if e.status_code == 404:
-                    typer.echo("Error: PR not found or not accessible", err=True)
-                    typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
-                    if not final_github_token:
-                        typer.echo(
-                            "  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN environment variable",
-                            err=True,
-                        )
-                        typer.echo("  Example: export GH_TOKEN='your-token'", err=True)
-                    else:
-                        typer.echo(
-                            "  Hint: Check that the PR exists and you have access to it", err=True
-                        )
+                    ErrorHandler.handle_github_404(owner, repo, pr, bool(final_github_token))
                 else:
-                    typer.echo(f"GitHub API error: {e}", err=True)
+                    ErrorHandler.handle_github_error(e)
                 raise typer.Exit(1)
-            except Exception as e:
+            except typer.Exit:
+                # Re-raise typer.Exit (success case) without catching it
+                raise
+            except (ValueError, RuntimeError) as e:
                 typer.echo(f"Failed to fetch PR: {e}", err=True)
+                logger.debug("Fetch error", exc_info=True)
                 raise typer.Exit(1)
 
         # Analyze PR
@@ -277,28 +266,19 @@ def _analyze_pr_impl(
             typer.echo("Analyzing complexity with LLM...", err=True)
         except GitHubAPIError as e:
             if e.status_code == 404:
-                typer.echo("Error: PR not found or not accessible", err=True)
-                typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
-                if not final_github_token:
-                    typer.echo(
-                        "  Hint: If this is a private repository, set GH_TOKEN or GITHUB_TOKEN",
-                        err=True,
-                    )
-                else:
-                    typer.echo(
-                        "  Hint: Check that the PR exists and you have access to it", err=True
-                    )
+                ErrorHandler.handle_github_404(owner, repo, pr, bool(final_github_token))
             else:
-                typer.echo(f"GitHub API error: {e}", err=True)
+                ErrorHandler.handle_github_error(e)
             raise typer.Exit(1)
         except LLMError as e:
-            typer.echo(f"LLM error: {e}", err=True)
+            ErrorHandler.handle_llm_error(e)
             raise typer.Exit(1)
         except InvalidResponseError as e:
             typer.echo(f"Invalid LLM response: {e}", err=True)
             raise typer.Exit(1)
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             typer.echo(f"Unexpected error: {e}", err=True)
+            logger.debug("Analysis error", exc_info=True)
             raise typer.Exit(1)
 
         # Output
@@ -376,11 +356,7 @@ def _analyze_pr_impl(
     except typer.Exit:
         raise
     except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        import traceback
-
-        if os.getenv("DEBUG"):
-            typer.echo(traceback.format_exc(), err=True)
+        ErrorHandler.handle_unexpected_error(e, debug=bool(os.getenv("DEBUG")))
         raise typer.Exit(1)
 
 
@@ -406,20 +382,27 @@ def analyze_pr(
     prompt_file: Optional[Path] = typer.Option(
         None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
     ),
-    model: str = typer.Option("gpt-5.2", "--model", "-m", help="OpenAI model name"),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="OpenAI model name"),
     format: str = typer.Option("json", "--format", "-f", help="Output format: json or markdown"),
     output_file: Optional[Path] = typer.Option(
         None, "--output-file", "-o", help="Write output to file"
     ),
-    timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
-    max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
-    hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT, "--timeout", "-t", help="Request timeout in seconds"
+    ),
+    max_tokens: int = typer.Option(
+        DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum tokens for diff excerpt"
+    ),
+    hunks_per_file: int = typer.Option(
+        DEFAULT_HUNKS_PER_FILE, "--hunks-per-file", help="Maximum hunks per file"
+    ),
     sleep_seconds: float = typer.Option(
-        0.7, "--sleep-seconds", help="Sleep between GitHub API calls"
+        DEFAULT_SLEEP_SECONDS, "--sleep-seconds", help="Sleep between GitHub API calls"
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
     openai_api_key: Optional[str] = typer.Option(None, "--openai-api-key", help="OpenAI API key"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub token"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """Analyze a GitHub PR and compute complexity score."""
     final_pr_url = pr_url
@@ -447,6 +430,7 @@ def analyze_pr(
         dry_run=dry_run,
         openai_api_key=openai_api_key,
         github_token=github_token,
+        verbose=verbose,
     )
 
 
@@ -473,12 +457,18 @@ def batch_analyze(
     prompt_file: Optional[Path] = typer.Option(
         None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
     ),
-    model: str = typer.Option("gpt-5.2", "--model", "-m", help="OpenAI model name"),
-    timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
-    max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
-    hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="OpenAI model name"),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT, "--timeout", "-t", help="Request timeout in seconds"
+    ),
+    max_tokens: int = typer.Option(
+        DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum tokens for diff excerpt"
+    ),
+    hunks_per_file: int = typer.Option(
+        DEFAULT_HUNKS_PER_FILE, "--hunks-per-file", help="Maximum hunks per file"
+    ),
     sleep_seconds: float = typer.Option(
-        0.7, "--sleep-seconds", help="Sleep between GitHub API calls"
+        DEFAULT_SLEEP_SECONDS, "--sleep-seconds", help="Sleep between GitHub API calls"
     ),
     resume: bool = typer.Option(
         True, "--resume/--no-resume", help="Resume from existing output file"
@@ -673,11 +663,7 @@ def batch_analyze(
     except typer.Exit:
         raise
     except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        import traceback
-
-        if os.getenv("DEBUG"):
-            typer.echo(traceback.format_exc(), err=True)
+        ErrorHandler.handle_unexpected_error(e, debug=bool(os.getenv("DEBUG")))
         raise typer.Exit(1)
 
 
@@ -731,14 +717,10 @@ def rate_limit(
             typer.echo(json_output)
 
     except GitHubAPIError as e:
-        typer.echo(f"GitHub API error: {e}", err=True)
+        ErrorHandler.handle_github_error(e)
         raise typer.Exit(1)
     except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        import traceback
-
-        if os.getenv("DEBUG"):
-            typer.echo(traceback.format_exc(), err=True)
+        ErrorHandler.handle_unexpected_error(e, debug=bool(os.getenv("DEBUG")))
         raise typer.Exit(1)
 
 
@@ -750,12 +732,18 @@ def label_pr(
     prompt_file: Optional[Path] = typer.Option(
         None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
     ),
-    model: str = typer.Option("gpt-5.2", "--model", "-m", help="OpenAI model name"),
-    timeout: float = typer.Option(120.0, "--timeout", "-t", help="Request timeout in seconds"),
-    max_tokens: int = typer.Option(50000, "--max-tokens", help="Maximum tokens for diff excerpt"),
-    hunks_per_file: int = typer.Option(2, "--hunks-per-file", help="Maximum hunks per file"),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="OpenAI model name"),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT, "--timeout", "-t", help="Request timeout in seconds"
+    ),
+    max_tokens: int = typer.Option(
+        DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum tokens for diff excerpt"
+    ),
+    hunks_per_file: int = typer.Option(
+        DEFAULT_HUNKS_PER_FILE, "--hunks-per-file", help="Maximum hunks per file"
+    ),
     sleep_seconds: float = typer.Option(
-        0.7, "--sleep-seconds", help="Sleep between GitHub API calls"
+        DEFAULT_SLEEP_SECONDS, "--sleep-seconds", help="Sleep between GitHub API calls"
     ),
     label_prefix: str = typer.Option(
         "complexity:", "--label-prefix", help="Prefix for the complexity label"
@@ -834,13 +822,12 @@ def label_pr(
             )
         except GitHubAPIError as e:
             if e.status_code == 404:
-                typer.echo("Error: PR not found or not accessible", err=True)
-                typer.echo(f"  URL: https://github.com/{owner}/{repo}/pull/{pr}", err=True)
+                ErrorHandler.handle_github_404(owner, repo, pr, bool(final_github_token))
             else:
-                typer.echo(f"GitHub API error: {e}", err=True)
+                ErrorHandler.handle_github_error(e)
             raise typer.Exit(1)
         except LLMError as e:
-            typer.echo(f"LLM error: {e}", err=True)
+            ErrorHandler.handle_llm_error(e)
             raise typer.Exit(1)
         except InvalidResponseError as e:
             typer.echo(f"Invalid LLM response: {e}", err=True)
@@ -895,11 +882,7 @@ def label_pr(
     except typer.Exit:
         raise
     except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        import traceback
-
-        if os.getenv("DEBUG"):
-            typer.echo(traceback.format_exc(), err=True)
+        ErrorHandler.handle_unexpected_error(e, debug=bool(os.getenv("DEBUG")))
         raise typer.Exit(1)
 
 
@@ -940,13 +923,13 @@ def main(ctx: typer.Context):
     _analyze_pr_impl(
         pr_url=first_arg,
         prompt_file=None,
-        model="gpt-5.2",
+        model=DEFAULT_MODEL,
         format="json",
         output_file=None,
-        timeout=120.0,
-        max_tokens=50000,
-        hunks_per_file=2,
-        sleep_seconds=0.7,
+        timeout=DEFAULT_TIMEOUT,
+        max_tokens=DEFAULT_MAX_TOKENS,
+        hunks_per_file=DEFAULT_HUNKS_PER_FILE,
+        sleep_seconds=DEFAULT_SLEEP_SECONDS,
         dry_run=False,
     )
 
