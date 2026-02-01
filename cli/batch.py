@@ -742,9 +742,13 @@ def run_batch_analysis_with_labels(
                 for future in as_completed(future_to_pr):
                     pr_url, idx = future_to_pr[future]
                     try:
-                        pr_url_result, complexity, explanation, label_applied, error = (
-                            future.result()
-                        )
+                        (
+                            pr_url_result,
+                            complexity,
+                            explanation,
+                            label_applied,
+                            error,
+                        ) = future.result()
 
                         if error:
                             if isinstance(error, GitHubAPIError) and error.status_code == 404:
