@@ -1,13 +1,21 @@
 """CLI integration tests."""
 
 import json
+import re
 from unittest.mock import patch
 
 from typer.testing import CliRunner
 
 from cli.main import app
 
-runner = CliRunner()
+# Use mix_stderr=False to separate stdout/stderr, and create runner without color
+runner = CliRunner(mix_stderr=False)
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+    return ansi_escape.sub("", text)
 
 
 class TestAnalyzePrCommand:
@@ -66,10 +74,11 @@ class TestAnalyzePrCommand:
         """Test that help shows available options."""
         result = runner.invoke(app, ["analyze-pr", "--help"])
         assert result.exit_code == 0
-        assert "--model" in result.output
-        assert "--timeout" in result.output
-        assert "--dry-run" in result.output
-        assert "--verbose" in result.output
+        output = strip_ansi(result.output)
+        assert "--model" in output
+        assert "--timeout" in output
+        assert "--dry-run" in output
+        assert "--verbose" in output
 
 
 class TestRateLimitCommand:
@@ -110,7 +119,8 @@ class TestRateLimitCommand:
         """Test that help shows format option."""
         result = runner.invoke(app, ["rate-limit", "--help"])
         assert result.exit_code == 0
-        assert "--format" in result.output
+        output = strip_ansi(result.output)
+        assert "--format" in output
 
 
 class TestBatchAnalyzeCommand:
@@ -145,12 +155,13 @@ class TestBatchAnalyzeCommand:
         """Test that help shows available options."""
         result = runner.invoke(app, ["batch-analyze", "--help"])
         assert result.exit_code == 0
-        assert "--input-file" in result.output
-        assert "--org" in result.output
-        assert "--since" in result.output
-        assert "--until" in result.output
-        assert "--workers" in result.output
-        assert "--label" in result.output
+        output = strip_ansi(result.output)
+        assert "--input-file" in output
+        assert "--org" in output
+        assert "--since" in output
+        assert "--until" in output
+        assert "--workers" in output
+        assert "--label" in output
 
 
 class TestLabelPrCommand:
@@ -168,8 +179,9 @@ class TestLabelPrCommand:
         """Test that help shows available options."""
         result = runner.invoke(app, ["label-pr", "--help"])
         assert result.exit_code == 0
-        assert "--label-prefix" in result.output
-        assert "--dry-run" in result.output
+        output = strip_ansi(result.output)
+        assert "--label-prefix" in output
+        assert "--dry-run" in output
 
 
 class TestMainCallback:
