@@ -876,6 +876,16 @@ def label_pr(
                 f.write(f"score={complexity}\n")
                 f.write(f"label={label_prefix}{complexity}\n")
 
+                # Explanation (handle multiline)
+                explanation = output["explanation"]
+                if "\n" in explanation:
+                    delimiter = "EOF"
+                    f.write(
+                        f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n"
+                    )
+                else:
+                    f.write(f"explanation={explanation}\n")
+
     except KeyboardInterrupt:
         typer.echo("\nInterrupted by user", err=True)
         raise typer.Exit(130)
