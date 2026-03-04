@@ -24,8 +24,7 @@ jobs:
       - name: Label open PRs (skip already-labeled)
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           complexity-cli batch-analyze \
             --org lemonade-hq \
@@ -37,8 +36,7 @@ jobs:
       - name: Label closed PRs (re-label)
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           complexity-cli batch-analyze \
             --org lemonade-hq \
