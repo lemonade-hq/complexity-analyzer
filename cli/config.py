@@ -55,6 +55,11 @@ def get_openai_api_key() -> Optional[str]:
     return os.getenv("OPENAI_API_KEY")
 
 
+def get_openai_base_url() -> Optional[str]:
+    """Get base URL for OpenAI-compatible API from environment."""
+    return os.getenv("OPENAI_BASE_URL")
+
+
 def validate_owner_repo(owner: str, repo: str) -> None:
     """Validate owner and repo names."""
     pattern = re.compile(r"^[A-Za-z0-9_.-]+$")

@@ -188,6 +188,26 @@ class TestOpenAIProviderAnalyzeComplexity:
         assert result["tokens"] is None
 
 
+class TestOpenAIProviderBaseUrl:
+    """Tests for OpenAIProvider base_url support."""
+
+    @patch("cli.llm.OpenAI")
+    def test_base_url_passed_to_client(self, mock_openai_class):
+        """Test that base_url is passed through to the OpenAI client."""
+        OpenAIProvider("test-key", base_url="https://my-proxy.example.com/v1")
+        mock_openai_class.assert_called_once_with(
+            api_key="test-key", timeout=120.0, base_url="https://my-proxy.example.com/v1"
+        )
+
+    @patch("cli.llm.OpenAI")
+    def test_base_url_none_by_default(self, mock_openai_class):
+        """Test that base_url defaults to None (standard OpenAI endpoint)."""
+        OpenAIProvider("test-key")
+        mock_openai_class.assert_called_once_with(
+            api_key="test-key", timeout=120.0, base_url=None
+        )
+
+
 class TestLLMError:
     """Tests for LLMError exception."""
 

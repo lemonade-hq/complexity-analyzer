@@ -45,6 +45,9 @@ inputs:
     description: 'Sleep between GitHub API calls'
     required: false
     default: '0.7'
+  api-base-url:
+    description: 'Base URL for OpenAI-compatible API endpoint'
+    required: false
 
 outputs:
   score:
@@ -79,3 +82,5 @@ runs:
     - '${{ inputs.hunks-per-file }}'
     - '--sleep-seconds'
     - '${{ inputs.sleep-seconds }}'
+    - '--api-base-url'
+    - '${{ inputs.api-base-url }}'
