@@ -46,7 +46,7 @@ def test_load_pr_urls_from_file_empty(tmp_path):
         load_pr_urls_from_file(pr_file)
 
 
-@patch("cli.batch.search_closed_prs")
+@patch("cli.batch.search_prs")
 def test_generate_pr_list_from_cache(mock_search, tmp_path):
     """Test generating PR list from cache file."""
     cache_file = tmp_path / "cache.txt"
@@ -66,7 +66,7 @@ def test_generate_pr_list_from_cache(mock_search, tmp_path):
     mock_search.assert_not_called()
 
 
-@patch("cli.batch.search_closed_prs")
+@patch("cli.batch.search_prs")
 def test_generate_pr_list_from_github(mock_search, tmp_path):
     """Test generating PR list from GitHub API."""
     pr_urls = [
@@ -75,7 +75,7 @@ def test_generate_pr_list_from_github(mock_search, tmp_path):
     ]
 
     def mock_search_with_callback(
-        org, since, until, token, sleep_s, on_pr_found, progress_callback, client
+        org, since, until, token, sleep_s, on_pr_found, progress_callback, client, state="closed"
     ):
         """Mock that calls the on_pr_found callback for each URL."""
         for url in pr_urls:

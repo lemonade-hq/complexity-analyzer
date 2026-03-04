@@ -16,7 +16,7 @@ from .constants import DEFAULT_SLEEP_SECONDS, DEFAULT_TIMEOUT
 from .github import (
     GitHubAPIError,
     has_complexity_label,
-    search_closed_prs,
+    search_prs,
     update_complexity_label,
 )
 from .csv_handler import CSVBatchWriter
@@ -60,6 +60,7 @@ def generate_pr_list_from_date_range(
     cache_file: Optional[Path],
     github_token: Optional[str],
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
+    state: str = "closed",
 ) -> List[str]:
     """
     Generate PR list from date range, optionally using cache.
@@ -75,6 +76,7 @@ def generate_pr_list_from_date_range(
         cache_file: Optional path to cache file
         github_token: GitHub token
         sleep_seconds: Sleep between API calls
+        state: PR state to search for ("closed" or "open")
 
     Returns:
         List of PR URLs
@@ -91,7 +93,7 @@ def generate_pr_list_from_date_range(
 
     # Fetch from GitHub
     typer.echo(
-        f"Fetching closed PRs for org '{org}' from {since.date()} to {until.date()}...", err=True
+        f"Fetching {state} PRs for org '{org}' from {since.date()} to {until.date()}...", err=True
     )
     cache_file_handle = None
     try:
@@ -123,7 +125,7 @@ def generate_pr_list_from_date_range(
         # Try fetching with the full date range first
         with httpx.Client(timeout=60.0) as client:
             try:
-                urls = search_closed_prs(
+                urls = search_prs(
                     org=org,
                     since=since,
                     until=until,
@@ -132,6 +134,7 @@ def generate_pr_list_from_date_range(
                     on_pr_found=write_pr_to_cache if cache_file else None,
                     progress_callback=progress_msg,
                     client=client,
+                    state=state,
                 )
                 typer.echo(f"Found {len(urls)} PRs", err=True)
                 return urls
@@ -165,7 +168,7 @@ def generate_pr_list_from_date_range(
                         )
 
                         try:
-                            chunk_urls = search_closed_prs(
+                            chunk_urls = search_prs(
                                 org=org,
                                 since=current_since,
                                 until=chunk_until,
@@ -174,6 +177,7 @@ def generate_pr_list_from_date_range(
                                 on_pr_found=write_pr_to_cache if cache_file else None,
                                 progress_callback=progress_msg,
                                 client=client,
+                                state=state,
                             )
                             all_urls.extend(chunk_urls)
                             typer.echo(

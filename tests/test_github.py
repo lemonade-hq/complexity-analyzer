@@ -6,7 +6,7 @@ from datetime import datetime
 from unittest.mock import patch, Mock
 from cli.github import (
     fetch_pr_diff,
-    search_closed_prs,
+    search_prs,
     TokenRotator,
     _fetch_all_pr_files,
     _diff_from_files,
@@ -65,7 +65,7 @@ def test_validate_pr_number():
 
 
 @patch("cli.github.httpx.Client")
-def test_search_closed_prs_success(mock_client_class):
+def test_search_prs_success(mock_client_class):
     """Test successful PR search."""
     mock_response = Mock()
     mock_response.json.return_value = {
@@ -84,7 +84,7 @@ def test_search_closed_prs_success(mock_client_class):
     mock_client.get.return_value = mock_response
     mock_client_class.return_value = mock_client
 
-    result = search_closed_prs(
+    result = search_prs(
         org="testorg",
         since=datetime(2024, 1, 1),
         until=datetime(2024, 1, 31),
@@ -98,7 +98,7 @@ def test_search_closed_prs_success(mock_client_class):
 
 @patch("cli.github.wait_for_rate_limit")
 @patch("cli.github.httpx.Client")
-def test_search_closed_prs_pagination(mock_client_class, mock_wait_rate_limit):
+def test_search_prs_pagination(mock_client_class, mock_wait_rate_limit):
     """Test PR search with pagination."""
     mock_response_page1 = Mock()
     mock_response_page1.json.return_value = {
@@ -120,7 +120,7 @@ def test_search_closed_prs_pagination(mock_client_class, mock_wait_rate_limit):
     mock_client.get.side_effect = [mock_response_page1, mock_response_page2]
     mock_client_class.return_value = mock_client
 
-    result = search_closed_prs(
+    result = search_prs(
         org="testorg",
         since=datetime(2024, 1, 1),
         until=datetime(2024, 1, 31),
@@ -130,10 +130,10 @@ def test_search_closed_prs_pagination(mock_client_class, mock_wait_rate_limit):
     assert len(result) == 101
 
 
-def test_search_closed_prs_invalid_org():
+def test_search_prs_invalid_org():
     """Test PR search with invalid org name."""
     with pytest.raises(ValueError):
-        search_closed_prs(
+        search_prs(
             org="invalid/org",
             since=datetime(2024, 1, 1),
             until=datetime(2024, 1, 31),
