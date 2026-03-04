@@ -1,15 +1,13 @@
 name: PR Complexity Analysis
 
 on:
-  pull_request:
-    types: [opened, closed]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 jobs:
-  analyze:
+  label-prs:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: read
 
     steps:
       - name: Checkout code
@@ -23,9 +21,27 @@ jobs:
       - name: Install dependencies
         run: pip install -e .
 
-      - name: Analyze and label PR
+      - name: Label open PRs (skip already-labeled)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          complexity-cli label-pr "${{ github.event.pull_request.html_url }}"
+          complexity-cli batch-analyze \
+            --org lemonade-hq \
+            --state open \
+            --since-minutes 20 \
+            --label \
+            --workers 5
+
+      - name: Label closed PRs (re-label)
+        env:
+          GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          complexity-cli batch-analyze \
+            --org lemonade-hq \
+            --state closed \
+            --since-minutes 20 \
+            --label \
+            --force \
+            --workers 5

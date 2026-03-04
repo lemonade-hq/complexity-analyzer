@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -485,6 +485,14 @@ def batch_analyze(
     force: bool = typer.Option(
         False, "--force", "-f", help="Re-analyze PRs even if they already have a complexity label"
     ),
+    state: str = typer.Option(
+        "closed", "--state", help="PR state to search for: 'closed' or 'open' (used with --org)"
+    ),
+    since_minutes: Optional[int] = typer.Option(
+        None,
+        "--since-minutes",
+        help="Look back N minutes from now (mutually exclusive with --since/--until)",
+    ),
     github_tokens: Optional[str] = typer.Option(
         None,
         "--github-tokens",
@@ -517,13 +525,27 @@ def batch_analyze(
     """
     try:
         # Validate inputs
-        if input_file and (org or since or until):
+        if input_file and (org or since or until or since_minutes):
             typer.echo("Error: Cannot specify both --input-file and date range options", err=True)
             raise typer.Exit(1)
 
-        if not input_file and not (org and since and until):
+        if since_minutes is not None and (since or until):
             typer.echo(
-                "Error: Must specify either --input-file OR (--org, --since, --until)", err=True
+                "Error: --since-minutes is mutually exclusive with --since/--until", err=True
+            )
+            raise typer.Exit(1)
+
+        if not input_file and not org:
+            typer.echo(
+                "Error: Must specify either --input-file OR --org (with date range options)",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        if not input_file and org and since_minutes is None and not (since and until):
+            typer.echo(
+                "Error: Must specify either --since-minutes OR (--since, --until) with --org",
+                err=True,
             )
             raise typer.Exit(1)
 
@@ -594,17 +616,23 @@ def batch_analyze(
             typer.echo(f"Loading PR URLs from file: {input_file}", err=True)
             pr_urls = load_pr_urls_from_file(input_file)
         else:
-            # Parse dates
-            try:
-                since_dt = datetime.strptime(since, "%Y-%m-%d")
-                until_dt = datetime.strptime(until, "%Y-%m-%d")
-            except ValueError as e:
-                typer.echo(f"Error: Invalid date format. Use YYYY-MM-DD: {e}", err=True)
-                raise typer.Exit(1)
+            # Compute dates from --since-minutes or --since/--until
+            if since_minutes is not None:
+                now = datetime.now(timezone.utc)
+                until_dt = now
+                since_dt = now - timedelta(minutes=since_minutes)
+            else:
+                # Parse dates
+                try:
+                    since_dt = datetime.strptime(since, "%Y-%m-%d")
+                    until_dt = datetime.strptime(until, "%Y-%m-%d")
+                except ValueError as e:
+                    typer.echo(f"Error: Invalid date format. Use YYYY-MM-DD: {e}", err=True)
+                    raise typer.Exit(1)
 
-            if since_dt > until_dt:
-                typer.echo("Error: --since date must be before --until date", err=True)
-                raise typer.Exit(1)
+                if since_dt > until_dt:
+                    typer.echo("Error: --since date must be before --until date", err=True)
+                    raise typer.Exit(1)
 
             pr_urls = generate_pr_list_from_date_range(
                 org=org,
@@ -613,6 +641,7 @@ def batch_analyze(
                 cache_file=cache_file,
                 github_token=github_token,
                 sleep_seconds=sleep_seconds,
+                state=state,
             )
 
         # Create analyzer function with progress callback

@@ -963,7 +963,7 @@ def has_complexity_label(
     return None
 
 
-def search_closed_prs(
+def search_prs(
     org: str,
     since: datetime,
     until: datetime,
@@ -974,11 +974,12 @@ def search_closed_prs(
     max_retries: int = 5,
     progress_callback: Optional[Callable[[str], None]] = None,
     client: Optional[httpx.Client] = None,
+    state: str = "closed",
 ) -> List[str]:
     """
-    Search for closed PRs in an organization within a date range.
+    Search for PRs in an organization within a date range.
 
-    Uses GitHub Search API to find PRs closed between since and until dates.
+    Uses GitHub Search API to find PRs within the given date range.
     Handles secondary rate limits with exponential backoff.
 
     Args:
@@ -992,27 +993,39 @@ def search_closed_prs(
         max_retries: Maximum number of retries for rate limit errors
         progress_callback: Optional callback for progress messages (e.g., rate limit warnings)
         client: Optional httpx.Client to reuse connections
+        state: PR state to search for ("closed" or "open")
 
     Returns:
         List of PR URLs (e.g., ["https://github.com/org/repo/pull/123", ...])
 
     Raises:
         GitHubAPIError: If API call fails after retries
-        ValueError: If org name is invalid
+        ValueError: If org name is invalid or state is invalid
     """
     # Validate org name
     pattern = re.compile(r"^[A-Za-z0-9_.-]+$")
     if not pattern.match(org):
         raise ValueError(f"Invalid organization name: {org}")
 
+    if state not in ("closed", "open"):
+        raise ValueError(f"Invalid state: {state}. Must be 'closed' or 'open'.")
+
     headers = build_github_headers(token)
 
-    # Format dates for GitHub search (YYYY-MM-DD)
-    since_str = since.strftime("%Y-%m-%d")
-    until_str = until.strftime("%Y-%m-%d")
+    # Format dates: use ISO 8601 if time component is present, date-only otherwise
+    def _fmt(dt: datetime) -> str:
+        if dt.hour == 0 and dt.minute == 0 and dt.second == 0 and dt.microsecond == 0:
+            return dt.strftime("%Y-%m-%d")
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # GitHub search query: org:orgname is:pr is:closed closed:YYYY-MM-DD..YYYY-MM-DD
-    query = f"org:{org} is:pr is:closed closed:{since_str}..{until_str}"
+    since_str = _fmt(since)
+    until_str = _fmt(until)
+
+    # Build search query based on state
+    if state == "closed":
+        query = f"org:{org} is:pr is:closed closed:{since_str}..{until_str}"
+    else:
+        query = f"org:{org} is:pr is:open created:{since_str}..{until_str}"
 
     url = "https://api.github.com/search/issues"
     # GitHub Search API limit is 100 items per page
