@@ -17,7 +17,13 @@ class LLMError(Exception):
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider implementation."""
 
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_MODEL,
+        timeout: float = DEFAULT_TIMEOUT,
+        base_url: str | None = None,
+    ):
         """
         Initialize OpenAI provider.
 
@@ -25,8 +31,9 @@ class OpenAIProvider(LLMProvider):
             api_key: OpenAI API key
             model: Model name (e.g., "gpt-5.2", "gpt-4")
             timeout: Request timeout in seconds
+            base_url: Base URL for OpenAI-compatible API endpoint
         """
-        self.client = OpenAI(api_key=api_key, timeout=timeout)
+        self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self._model = model
         self.timeout = timeout
 

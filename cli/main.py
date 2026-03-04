@@ -22,6 +22,7 @@ from .config import (  # noqa: E402
     get_github_token,
     get_github_tokens,
     get_openai_api_key,
+    get_openai_base_url,
     validate_owner_repo,
     validate_pr_number,
 )
@@ -69,6 +70,7 @@ def analyze_pr_to_dict(
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
     progress_callback: Optional[Callable[[str], None]] = None,
     token_rotator: Optional[TokenRotator] = None,
+    base_url: Optional[str] = None,
 ) -> dict:
     """
     Analyze a GitHub PR and return result as dictionary.
@@ -136,7 +138,7 @@ def analyze_pr_to_dict(
     diff_for_prompt = make_prompt_input(pr_url, title, stats, selected_files, truncated_diff)
 
     # Call LLM
-    provider = OpenAIProvider(openai_key, model=model, timeout=timeout)
+    provider = OpenAIProvider(openai_key, model=model, timeout=timeout, base_url=base_url)
     result = provider.analyze_complexity(
         prompt=prompt_text,
         diff_excerpt=diff_for_prompt,
@@ -176,6 +178,7 @@ def _analyze_pr_impl(
     openai_api_key: Optional[str] = None,
     github_token: Optional[str] = None,
     verbose: bool = False,
+    base_url: Optional[str] = None,
 ):
     """
     Analyze a GitHub PR and compute complexity score.
@@ -260,6 +263,7 @@ def _analyze_pr_impl(
                 max_tokens=max_tokens,
                 hunks_per_file=hunks_per_file,
                 sleep_seconds=sleep_seconds,
+                base_url=base_url,
             )
             typer.echo(f"PR: {output['title']}", err=True)
             typer.echo("Processing diff...", err=True)
@@ -402,6 +406,9 @@ def analyze_pr(
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
     openai_api_key: Optional[str] = typer.Option(None, "--openai-api-key", help="OpenAI API key"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub token"),
+    api_base_url: Optional[str] = typer.Option(
+        None, "--api-base-url", help="Base URL for OpenAI-compatible API endpoint"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """Analyze a GitHub PR and compute complexity score."""
@@ -431,6 +438,7 @@ def analyze_pr(
         openai_api_key=openai_api_key,
         github_token=github_token,
         verbose=verbose,
+        base_url=api_base_url or get_openai_base_url(),
     )
 
 
@@ -493,6 +501,9 @@ def batch_analyze(
         "--since-minutes",
         help="Look back N minutes from now (mutually exclusive with --since/--until)",
     ),
+    api_base_url: Optional[str] = typer.Option(
+        None, "--api-base-url", help="Base URL for OpenAI-compatible API endpoint"
+    ),
     github_tokens: Optional[str] = typer.Option(
         None,
         "--github-tokens",
@@ -553,6 +564,9 @@ def batch_analyze(
         if not label and not output_file:
             typer.echo("Error: --output is required unless --label is used", err=True)
             raise typer.Exit(1)
+
+        # Resolve base URL (CLI option takes precedence over env)
+        final_base_url = api_base_url or get_openai_base_url()
 
         # Get credentials
         openai_key = get_openai_api_key()
@@ -663,6 +677,7 @@ def batch_analyze(
                 sleep_seconds=sleep_seconds,
                 progress_callback=progress_msg,
                 token_rotator=token_rotator,
+                base_url=final_base_url,
             )
 
         # Validate workers
@@ -780,6 +795,9 @@ def label_pr(
     dry_run: bool = typer.Option(False, "--dry-run", help="Analyze but don't update label"),
     openai_api_key: Optional[str] = typer.Option(None, "--openai-api-key", help="OpenAI API key"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub token"),
+    api_base_url: Optional[str] = typer.Option(
+        None, "--api-base-url", help="Base URL for OpenAI-compatible API endpoint"
+    ),
 ):
     """
     Analyze a GitHub PR and update its complexity label.
@@ -848,6 +866,7 @@ def label_pr(
                 max_tokens=max_tokens,
                 hunks_per_file=hunks_per_file,
                 sleep_seconds=sleep_seconds,
+                base_url=api_base_url or get_openai_base_url(),
             )
         except GitHubAPIError as e:
             if e.status_code == 404:
@@ -970,6 +989,7 @@ def main(ctx: typer.Context):
         hunks_per_file=DEFAULT_HUNKS_PER_FILE,
         sleep_seconds=DEFAULT_SLEEP_SECONDS,
         dry_run=False,
+        base_url=get_openai_base_url(),
     )
 
 
