@@ -57,7 +57,7 @@ def get_openai_api_key() -> Optional[str]:
 
 def get_openai_base_url() -> Optional[str]:
     """Get base URL for OpenAI-compatible API from environment."""
-    return os.getenv("OPENAI_BASE_URL")
+    return os.getenv("OPENAI_BASE_URL") or None
 
 
 def validate_owner_repo(owner: str, repo: str) -> None:

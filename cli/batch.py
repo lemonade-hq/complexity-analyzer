@@ -671,6 +671,7 @@ def run_batch_analysis_with_labels(
     # Thread-safe counter and lock
     completed_lock = threading.Lock()
     completed_count = [0]
+    failed_count = [0]
     labeled_count = [0]
 
     def process_single_pr(
@@ -721,6 +722,7 @@ def run_batch_analysis_with_labels(
                     )
 
                     if error:
+                        failed_count[0] += 1
                         if isinstance(error, GitHubAPIError) and error.status_code == 404:
                             typer.echo(
                                 f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
@@ -735,6 +737,7 @@ def run_batch_analysis_with_labels(
                     if csv_writer:
                         csv_writer.add_row(pr_url_result, complexity, explanation)
 
+                    completed_count[0] += 1
                     if label_applied:
                         typer.echo(
                             f"✓ Completed: complexity={complexity}, label={label_applied}", err=True
@@ -769,6 +772,8 @@ def run_batch_analysis_with_labels(
                             ) = future.result()
 
                             if error:
+                                with completed_lock:
+                                    failed_count[0] += 1
                                 if isinstance(error, GitHubAPIError) and error.status_code == 404:
                                     typer.echo(
                                         f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
@@ -799,6 +804,8 @@ def run_batch_analysis_with_labels(
                                     )
 
                         except (RuntimeError, ValueError) as e:
+                            with completed_lock:
+                                failed_count[0] += 1
                             typer.echo(f"✗ Unexpected error processing {pr_url}: {e}", err=True)
                             logger.debug(f"Thread error for {pr_url}", exc_info=True)
 
@@ -812,6 +819,17 @@ def run_batch_analysis_with_labels(
         # Ensure all buffered rows are written to disk
         if csv_writer:
             csv_writer.close()
+
+    # Report failure summary
+    if failed_count[0] > 0:
+        typer.echo(
+            f"\n⚠ {failed_count[0]}/{remaining_count} PRs failed during processing", err=True
+        )
+
+    # Exit non-zero if ALL PRs failed (partial success is still success)
+    if remaining_count > 0 and completed_count[0] == 0:
+        typer.echo("Error: All PRs failed to process", err=True)
+        raise typer.Exit(1)
 
     # Summary
     if label_prs:
