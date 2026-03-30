@@ -3,7 +3,13 @@
 import os
 import pytest
 from unittest.mock import patch
-from cli.config import validate_owner_repo, validate_pr_number, get_github_tokens
+from cli.config import (
+    validate_owner_repo,
+    validate_pr_number,
+    get_github_tokens,
+    get_gitlab_token,
+    get_gitlab_tokens,
+)
 from cli.config_types import AnalysisConfig, BatchConfig, OutputConfig
 
 
@@ -97,6 +103,77 @@ class TestGetGitHubTokens:
         """Test fallback to single token if multi-token env var is empty."""
         tokens = get_github_tokens()
         assert tokens == ["fallback"]
+
+
+# get_gitlab_token tests
+
+
+class TestGetGitLabToken:
+    """Tests for the get_gitlab_token function."""
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_no_token_returns_none(self):
+        """Test that None is returned when no token is set."""
+        assert get_gitlab_token() is None
+
+    @patch.dict(os.environ, {"GITLAB_TOKEN": "my-token"}, clear=True)
+    def test_gitlab_token(self):
+        """Test getting token from GITLAB_TOKEN."""
+        assert get_gitlab_token() == "my-token"
+
+    @patch.dict(os.environ, {"GL_TOKEN": "gl-token"}, clear=True)
+    def test_gl_token_alias(self):
+        """Test getting token from GL_TOKEN alias."""
+        assert get_gitlab_token() == "gl-token"
+
+    @patch.dict(os.environ, {"GL_TOKEN": "gl-token", "GITLAB_TOKEN": "gitlab-token"}, clear=True)
+    def test_gl_token_takes_precedence(self):
+        """Test that GL_TOKEN takes precedence over GITLAB_TOKEN."""
+        assert get_gitlab_token() == "gl-token"
+
+
+# get_gitlab_tokens tests
+
+
+class TestGetGitLabTokens:
+    """Tests for the get_gitlab_tokens function."""
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_no_tokens_returns_empty(self):
+        """Test that empty list is returned when no tokens are set."""
+        assert get_gitlab_tokens() == []
+
+    @patch.dict(os.environ, {"GITLAB_TOKEN": "single"}, clear=True)
+    def test_single_token_fallback(self):
+        """Test fallback to single token."""
+        assert get_gitlab_tokens() == ["single"]
+
+    @patch.dict(os.environ, {"GITLAB_TOKENS": "t1,t2,t3"}, clear=True)
+    def test_multiple_tokens_comma_separated(self):
+        """Test getting multiple tokens from GITLAB_TOKENS."""
+        assert get_gitlab_tokens() == ["t1", "t2", "t3"]
+
+    @patch.dict(os.environ, {"GL_TOKENS": "g1,g2"}, clear=True)
+    def test_gl_tokens_alias(self):
+        """Test getting multiple tokens from GL_TOKENS alias."""
+        assert get_gitlab_tokens() == ["g1", "g2"]
+
+    @patch.dict(os.environ, {"GITLAB_TOKENS": "t1,,t2,,,t3"}, clear=True)
+    def test_empty_tokens_filtered(self):
+        """Test that empty tokens are filtered out."""
+        assert get_gitlab_tokens() == ["t1", "t2", "t3"]
+
+    @patch.dict(
+        os.environ, {"GL_TOKENS": "gl1,gl2", "GITLAB_TOKENS": "lab1,lab2"}, clear=True
+    )
+    def test_gl_tokens_takes_precedence(self):
+        """Test that GL_TOKENS takes precedence over GITLAB_TOKENS."""
+        assert get_gitlab_tokens() == ["gl1", "gl2"]
+
+    @patch.dict(os.environ, {"GITLAB_TOKENS": "", "GITLAB_TOKEN": "fallback"}, clear=True)
+    def test_falls_back_to_single_if_multi_empty(self):
+        """Test fallback to single token if multi-token var is empty."""
+        assert get_gitlab_tokens() == ["fallback"]
 
 
 # AnalysisConfig validation tests

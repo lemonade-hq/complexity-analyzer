@@ -1,10 +1,12 @@
 """Tests for utility functions."""
 
 import pytest
+from unittest.mock import patch
 
 from cli.utils import (
     build_github_diff_headers,
     build_github_headers,
+    parse_mr_url,
     parse_pr_url,
     redact_token,
     setup_github_tokens,
@@ -62,6 +64,90 @@ class TestParsePrUrl:
         """Test that URL without PR number raises ValueError."""
         with pytest.raises(ValueError, match="Invalid PR URL"):
             parse_pr_url("https://github.com/owner/repo/pull/")
+
+
+class TestParseMrUrl:
+    """Tests for parse_mr_url function (auto-detecting GitHub vs GitLab)."""
+
+    def test_github_url(self):
+        """Test parsing a GitHub PR URL."""
+        owner, repo, number, provider, base_url = parse_mr_url(
+            "https://github.com/owner/repo/pull/123"
+        )
+        assert owner == "owner"
+        assert repo == "repo"
+        assert number == 123
+        assert provider == "github"
+        assert base_url == "https://github.com"
+
+    def test_gitlab_url(self):
+        """Test parsing a GitLab MR URL."""
+        project, repo, number, provider, base_url = parse_mr_url(
+            "https://gitlab.com/group/repo/-/merge_requests/42"
+        )
+        assert project == "group/repo"
+        assert repo == ""
+        assert number == 42
+        assert provider == "gitlab"
+        assert base_url == "https://gitlab.com"
+
+    def test_gitlab_nested_group(self):
+        """Test parsing a GitLab MR URL with nested group."""
+        project, _, number, provider, base_url = parse_mr_url(
+            "https://gitlab.com/group/subgroup/repo/-/merge_requests/7"
+        )
+        assert project == "group/subgroup/repo"
+        assert number == 7
+        assert provider == "gitlab"
+
+    def test_gitlab_self_hosted(self):
+        """Test parsing a self-hosted GitLab URL."""
+        project, _, number, provider, base_url = parse_mr_url(
+            "https://git.example.com/team/project/-/merge_requests/99"
+        )
+        assert project == "team/project"
+        assert number == 99
+        assert provider == "gitlab"
+        assert base_url == "https://git.example.com"
+
+    def test_gitlab_http_scheme(self):
+        """Test parsing a GitLab URL with http scheme."""
+        _, _, _, _, base_url = parse_mr_url(
+            "http://gitlab.internal/group/repo/-/merge_requests/1"
+        )
+        assert base_url == "http://gitlab.internal"
+
+    def test_invalid_url(self):
+        """Test that an invalid URL raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid PR URL"):
+            parse_mr_url("https://example.com/not/a/pr")
+
+    def test_empty_url(self):
+        """Test that an empty URL raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid PR URL"):
+            parse_mr_url("")
+
+    def test_trailing_whitespace(self):
+        """Test that trailing whitespace is handled."""
+        owner, _, number, provider, _ = parse_mr_url(
+            "  https://github.com/owner/repo/pull/1  "
+        )
+        assert owner == "owner"
+        assert number == 1
+        assert provider == "github"
+
+    def test_self_hosted_domain_warns(self):
+        """Test that non-standard GitLab domains produce a warning."""
+        with patch("cli.utils.logger") as mock_logger:
+            parse_mr_url("https://git.company.com/team/project/-/merge_requests/1")
+            mock_logger.warning.assert_called_once()
+            assert "non-standard domain" in mock_logger.warning.call_args[0][0].lower()
+
+    def test_known_gitlab_domain_no_warning(self):
+        """Test that known GitLab domains don't produce a warning."""
+        with patch("cli.utils.logger") as mock_logger:
+            parse_mr_url("https://gitlab.com/group/repo/-/merge_requests/1")
+            mock_logger.warning.assert_not_called()
 
 
 class TestBuildGithubHeaders:
