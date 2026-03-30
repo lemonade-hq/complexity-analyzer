@@ -1,15 +1,22 @@
 """Shared utilities for the CLI."""
 
+import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .constants import GITHUB_API_VERSION, TOKEN_VISIBLE_CHARS
+
+logger = logging.getLogger("complexity-cli")
 
 # Regex to parse GitHub PR URL
 _OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
 
 # Regex to parse GitLab MR URL (any domain with /-/merge_requests/ pattern)
 _GITLAB_MR_RE = re.compile(r"https?://([^/\s]+)/(.+?)/-/merge_requests/(\d+)")
+
+# Well-known GitLab domains that are safe to send tokens to.
+# Self-hosted domains will trigger a warning log.
+_KNOWN_GITLAB_DOMAINS: Set[str] = {"gitlab.com", "gitlab.io"}
 
 
 def parse_mr_url(url: str) -> Tuple[str, str, int, str, str]:
@@ -47,6 +54,15 @@ def parse_mr_url(url: str) -> Tuple[str, str, int, str, str]:
         if url.startswith("http://"):
             scheme = "http"
         base_url = f"{scheme}://{domain}"
+
+        # Warn about self-hosted domains where tokens will be sent
+        if domain not in _KNOWN_GITLAB_DOMAINS:
+            logger.warning(
+                "GitLab token will be sent to non-standard domain: %s. "
+                "Ensure this is a trusted GitLab instance.",
+                domain,
+            )
+
         return project_path, "", int(mr_iid), "gitlab", base_url
 
     raise ValueError(f"Invalid PR URL: {url}")

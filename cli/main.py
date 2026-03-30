@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -22,7 +21,6 @@ from .config import (  # noqa: E402
     get_github_token,
     get_github_tokens,
     get_gitlab_token,
-    get_gitlab_tokens,
     get_openai_api_key,
     get_openai_base_url,
     validate_owner_repo,
@@ -54,16 +52,12 @@ from .llm import LLMError, OpenAIProvider  # noqa: E402
 from .logging_config import get_logger, setup_logging  # noqa: E402
 from .preprocess import make_prompt_input, process_diff  # noqa: E402
 from .scoring import InvalidResponseError  # noqa: E402
-from .utils import parse_mr_url, parse_pr_url  # noqa: E402
+from .utils import _GITLAB_MR_RE, _OWNER_REPO_RE, parse_mr_url, parse_pr_url  # noqa: E402
 
 app = typer.Typer(help="Analyze GitHub PR / GitLab MR complexity using LLMs")
 
 # Initialize logger
 logger = get_logger()
-
-# Keep regex for direct URL validation in main callback
-_OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
-_GITLAB_MR_RE = re.compile(r"https?://([^/\s]+)/(.+?)/-/merge_requests/(\d+)")
 
 
 def analyze_pr_to_dict(
@@ -301,7 +295,12 @@ def _analyze_pr_impl(
                     else:
                         ErrorHandler.handle_github_error(e)
                 else:
-                    typer.echo(f"GitLab API error: {e}", err=True)
+                    if e.status_code == 404:
+                        ErrorHandler.handle_gitlab_404(
+                            owner_or_project, number, bool(final_gitlab_token)
+                        )
+                    else:
+                        ErrorHandler.handle_gitlab_error(e)
                 raise typer.Exit(1)
             except typer.Exit:
                 # Re-raise typer.Exit (success case) without catching it
@@ -339,7 +338,12 @@ def _analyze_pr_impl(
                 else:
                     ErrorHandler.handle_github_error(e)
             else:
-                typer.echo(f"GitLab API error: {e}", err=True)
+                if e.status_code == 404:
+                    ErrorHandler.handle_gitlab_404(
+                        owner_or_project, number, bool(final_gitlab_token)
+                    )
+                else:
+                    ErrorHandler.handle_gitlab_error(e)
             raise typer.Exit(1)
         except LLMError as e:
             ErrorHandler.handle_llm_error(e)
@@ -1065,6 +1069,7 @@ def main(ctx: typer.Context):
         hunks_per_file=DEFAULT_HUNKS_PER_FILE,
         sleep_seconds=DEFAULT_SLEEP_SECONDS,
         dry_run=False,
+        gitlab_token=get_gitlab_token(),
         base_url=get_openai_base_url(),
     )
 

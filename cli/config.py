@@ -51,19 +51,22 @@ def get_github_tokens() -> List[str]:
 
 
 def get_gitlab_token() -> Optional[str]:
-    """Get GitLab token from environment."""
-    return os.getenv("GITLAB_TOKEN")
+    """Get GitLab token from environment.
+
+    Checks GL_TOKEN first, then GITLAB_TOKEN.
+    """
+    return os.getenv("GL_TOKEN") or os.getenv("GITLAB_TOKEN")
 
 
 def get_gitlab_tokens() -> List[str]:
     """Get multiple GitLab tokens from environment.
 
-    Checks GITLAB_TOKENS first (comma-separated), then falls back to single token.
+    Checks GL_TOKENS / GITLAB_TOKENS first (comma-separated), then falls back to single token.
 
     Returns:
         List of GitLab tokens (empty list if none found)
     """
-    tokens_str = os.getenv("GITLAB_TOKENS")
+    tokens_str = os.getenv("GL_TOKENS") or os.getenv("GITLAB_TOKENS")
     if tokens_str:
         tokens = []
         for line in tokens_str.replace("\n", ",").split(","):

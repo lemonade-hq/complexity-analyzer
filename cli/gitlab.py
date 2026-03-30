@@ -1,16 +1,23 @@
 """GitLab API client for fetching MR diffs and metadata."""
 
+import logging
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import httpx
 
-from .constants import DEFAULT_TIMEOUT, DEFAULT_SLEEP_SECONDS
+from .constants import DEFAULT_TIMEOUT, DEFAULT_SLEEP_SECONDS, GITLAB_PER_PAGE
 from .github import TokenRotator
 
 # Re-use redact_token from utils
 from .utils import redact_token
+
+logger = logging.getLogger("complexity-cli")
+
+# Pattern for valid GitLab project paths (alphanumeric, hyphens, underscores, dots, slashes)
+_VALID_PROJECT_PATH_RE = re.compile(r"^[A-Za-z0-9_.\-/]+$")
 
 
 class GitLabAPIError(Exception):
@@ -21,6 +28,20 @@ class GitLabAPIError(Exception):
         self.message = message
         self.url = url
         super().__init__(f"GitLab API error {status_code} for {url}: {message}")
+
+
+def validate_project_path(project_path: str) -> None:
+    """Validate a GitLab project path."""
+    if not project_path:
+        raise ValueError("GitLab project path cannot be empty")
+    if not _VALID_PROJECT_PATH_RE.match(project_path):
+        raise ValueError(f"Invalid GitLab project path: {project_path}")
+
+
+def validate_mr_iid(mr_iid: int) -> None:
+    """Validate a GitLab MR IID."""
+    if mr_iid <= 0:
+        raise ValueError(f"MR IID must be positive, got: {mr_iid}")
 
 
 def build_gitlab_headers(token: Optional[str] = None) -> Dict[str, str]:
@@ -66,6 +87,9 @@ def _diff_from_gitlab_diffs(diffs: List[Dict[str, Any]]) -> str:
         patch = d.get("diff")
         if not patch:
             continue
+        if d.get("truncated"):
+            filename_warn = d.get("new_path") or d.get("old_path", "unknown")
+            logger.warning("GitLab diff truncated for file: %s", filename_warn)
         filename = d.get("new_path") or d.get("old_path", "unknown")
         old_path = d.get("old_path", filename)
         # The GitLab diff field already contains --- / +++ lines,
@@ -80,9 +104,10 @@ def _fetch_mr_diffs_raw(
     token: Optional[str] = None,
     base_url: str = "https://gitlab.com",
     timeout: float = DEFAULT_TIMEOUT,
+    client: Optional[httpx.Client] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Fetch raw diff entries from GitLab /diffs endpoint.
+    Fetch raw diff entries from GitLab /diffs endpoint with pagination.
 
     Args:
         project_path: Full project path (e.g. 'gitlab-org/gitlab')
@@ -90,6 +115,7 @@ def _fetch_mr_diffs_raw(
         token: GitLab private token
         base_url: GitLab instance base URL
         timeout: Request timeout in seconds
+        client: Optional httpx.Client to reuse
 
     Returns:
         List of diff entry dicts from the API
@@ -98,11 +124,27 @@ def _fetch_mr_diffs_raw(
     url = f"{base_url}/api/v4/projects/{encoded_path}/merge_requests/{mr_iid}/diffs"
     headers = build_gitlab_headers(token)
 
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.get(url, headers=headers)
+    def _do_fetch(c: httpx.Client) -> List[Dict[str, Any]]:
+        all_diffs: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            params = {"per_page": GITLAB_PER_PAGE, "page": page}
+            response = c.get(url, headers=headers, params=params)
             response.raise_for_status()
-            return response.json()
+            page_data = response.json()
+            if not page_data:
+                break
+            all_diffs.extend(page_data)
+            if len(page_data) < GITLAB_PER_PAGE:
+                break
+            page += 1
+        return all_diffs
+
+    try:
+        if client:
+            return _do_fetch(client)
+        with httpx.Client(timeout=timeout) as c:
+            return _do_fetch(c)
     except httpx.HTTPStatusError as e:
         raise GitLabAPIError(
             e.response.status_code,
@@ -113,65 +155,42 @@ def _fetch_mr_diffs_raw(
         raise RuntimeError(f"Failed to fetch MR diffs: {e}")
 
 
-def fetch_mr_diff(
+def _fetch_mr_details(
     project_path: str,
     mr_iid: int,
     token: Optional[str] = None,
     base_url: str = "https://gitlab.com",
     timeout: float = DEFAULT_TIMEOUT,
-) -> str:
-    """
-    Fetch MR diff from GitLab API as unified diff string.
-
-    Uses the /diffs endpoint and reconstructs a unified diff.
-
-    Args:
-        project_path: Full project path (e.g. 'gitlab-org/gitlab')
-        mr_iid: Merge request IID (internal ID)
-        token: GitLab private token (optional for public projects)
-        base_url: GitLab instance base URL
-        timeout: Request timeout in seconds
-
-    Returns:
-        Diff text as string
-    """
-    diffs = _fetch_mr_diffs_raw(project_path, mr_iid, token, base_url, timeout)
-    return _diff_from_gitlab_diffs(diffs)
-
-
-def fetch_mr_metadata(
-    project_path: str,
-    mr_iid: int,
-    token: Optional[str] = None,
-    base_url: str = "https://gitlab.com",
-    timeout: float = DEFAULT_TIMEOUT,
+    client: Optional[httpx.Client] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch MR metadata from GitLab API, normalized to GitHub PR shape.
+    Fetch MR detail metadata from GitLab API.
 
     Args:
         project_path: Full project path (e.g. 'gitlab-org/gitlab')
         mr_iid: Merge request IID (internal ID)
-        token: GitLab private token (optional for public projects)
+        token: GitLab private token
         base_url: GitLab instance base URL
         timeout: Request timeout in seconds
+        client: Optional httpx.Client to reuse
 
     Returns:
-        Metadata dict normalized to match GitHub PR shape (with 'title', 'files' keys)
+        Raw MR metadata dict from the API
     """
     encoded_path = _encode_project_path(project_path)
+    mr_url = f"{base_url}/api/v4/projects/{encoded_path}/merge_requests/{mr_iid}"
     headers = build_gitlab_headers(token)
 
-    # Fetch MR metadata
-    mr_url = f"{base_url}/api/v4/projects/{encoded_path}/merge_requests/{mr_iid}"
+    def _do_fetch(c: httpx.Client) -> Dict[str, Any]:
+        mr_response = c.get(mr_url, headers=headers)
+        mr_response.raise_for_status()
+        return mr_response.json()
 
     try:
-        with httpx.Client(timeout=timeout) as client:
-            # Fetch MR details
-            mr_response = client.get(mr_url, headers=headers)
-            mr_response.raise_for_status()
-            mr_data = mr_response.json()
-
+        if client:
+            return _do_fetch(client)
+        with httpx.Client(timeout=timeout) as c:
+            return _do_fetch(c)
     except httpx.HTTPStatusError as e:
         raise GitLabAPIError(
             e.response.status_code,
@@ -180,21 +199,6 @@ def fetch_mr_metadata(
         )
     except httpx.RequestError as e:
         raise RuntimeError(f"Failed to fetch MR metadata: {e}")
-
-    # Fetch diffs separately
-    diffs_data = _fetch_mr_diffs_raw(project_path, mr_iid, token, base_url, timeout)
-
-    # Normalize to GitHub shape
-    files = _normalize_gitlab_diffs(diffs_data)
-
-    return {
-        "title": mr_data.get("title", ""),
-        "html_url": mr_data.get("web_url", ""),
-        "number": mr_data.get("iid"),
-        "state": mr_data.get("state", ""),
-        "user": {"login": mr_data.get("author", {}).get("username", "")},
-        "files": files,
-    }
 
 
 def _normalize_gitlab_diffs(diffs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -238,7 +242,7 @@ def fetch_mr(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Fetch both MR diff and metadata.
+    Fetch both MR diff and metadata (diffs fetched once, shared).
 
     Args:
         project_path: Full project path (e.g. 'gitlab-org/gitlab')
@@ -252,10 +256,40 @@ def fetch_mr(
     Returns:
         Tuple of (diff_text, metadata_dict)
     """
-    diff_text = fetch_mr_diff(project_path, mr_iid, token, base_url, timeout)
-    time.sleep(sleep_s)
-    metadata = fetch_mr_metadata(project_path, mr_iid, token, base_url, timeout)
+    validate_project_path(project_path)
+    validate_mr_iid(mr_iid)
+
+    with httpx.Client(timeout=timeout) as client:
+        # Fetch diffs once
+        diffs_raw = _fetch_mr_diffs_raw(project_path, mr_iid, token, base_url, timeout, client)
+        diff_text = _diff_from_gitlab_diffs(diffs_raw)
+
+        time.sleep(sleep_s)
+
+        # Fetch MR details
+        mr_data = _fetch_mr_details(project_path, mr_iid, token, base_url, timeout, client)
+
+    # Normalize files from the already-fetched diffs
+    files = _normalize_gitlab_diffs(diffs_raw)
+
+    metadata = {
+        "title": mr_data.get("title", ""),
+        "html_url": mr_data.get("web_url", ""),
+        "number": mr_data.get("iid"),
+        "state": mr_data.get("state", ""),
+        "user": {"login": mr_data.get("author", {}).get("username", "")},
+        "files": files,
+    }
+
     return diff_text, metadata
+
+
+def _parse_retry_after(error: GitLabAPIError) -> int:
+    """Extract Retry-After from a 429 error message, defaulting to 60s."""
+    # The error message contains the response text; try to parse Retry-After
+    # from the response. Since we don't have access to headers in the error,
+    # fall back to 60s.
+    return 60
 
 
 def fetch_mr_with_rotation(
@@ -300,9 +334,8 @@ def fetch_mr_with_rotation(
             last_error = e
             if e.status_code == 429:
                 # Rate limited — mark token and retry
-                import time as _time
-
-                reset_timestamp = int(_time.time()) + 60  # Default 60s wait
+                wait_seconds = _parse_retry_after(e)
+                reset_timestamp = int(time.time()) + wait_seconds
                 token_rotator.mark_rate_limited(token, reset_timestamp)
                 if progress_callback:
                     redacted = redact_token(token)
