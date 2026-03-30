@@ -29,3 +29,4 @@ DEFAULT_RETRY_DELAY = 1.0
 GITHUB_API_VERSION = "2022-11-28"
 GITHUB_API_BASE_URL = "https://api.github.com"
 GITHUB_PER_PAGE = 100  # Max items per page for GitHub API
+GITLAB_PER_PAGE = 100  # Max items per page for GitLab API

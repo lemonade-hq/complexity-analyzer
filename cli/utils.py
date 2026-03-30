@@ -5,8 +5,51 @@ from typing import Dict, List, Optional, Tuple
 
 from .constants import GITHUB_API_VERSION, TOKEN_VISIBLE_CHARS
 
-# Regex to parse PR URL
+# Regex to parse GitHub PR URL
 _OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
+
+# Regex to parse GitLab MR URL (any domain with /-/merge_requests/ pattern)
+_GITLAB_MR_RE = re.compile(r"https?://([^/\s]+)/(.+?)/-/merge_requests/(\d+)")
+
+
+def parse_mr_url(url: str) -> Tuple[str, str, int, str, str]:
+    """
+    Parse a PR/MR URL, auto-detecting GitHub vs GitLab.
+
+    Args:
+        url: GitHub PR or GitLab MR URL
+
+    Returns:
+        Tuple of (owner_or_project, repo_or_empty, number, provider, base_url)
+        - For GitHub: (owner, repo, pr_number, "github", "https://github.com")
+        - For GitLab: (project_path, "", mr_iid, "gitlab", "https://gitlab.com")
+
+    Raises:
+        ValueError: If URL format is invalid or unrecognized
+    """
+    url = url.strip()
+
+    # Try GitHub first
+    m = _OWNER_REPO_RE.match(url)
+    if m:
+        owner, repo, pr_str = m.group(1), m.group(2), m.group(3)
+        return owner, repo, int(pr_str), "github", "https://github.com"
+
+    # Try GitLab (any non-github domain with /-/merge_requests/)
+    m = _GITLAB_MR_RE.match(url)
+    if m:
+        domain = m.group(1)
+        project_path = m.group(2)
+        mr_iid = m.group(3)
+        # Determine the base URL from the domain
+        # Use https by default; check if original URL used http
+        scheme = "https"
+        if url.startswith("http://"):
+            scheme = "http"
+        base_url = f"{scheme}://{domain}"
+        return project_path, "", int(mr_iid), "gitlab", base_url
+
+    raise ValueError(f"Invalid PR URL: {url}")
 
 
 def parse_pr_url(url: str) -> Tuple[str, str, int]:

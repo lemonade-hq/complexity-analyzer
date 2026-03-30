@@ -21,6 +21,8 @@ from .batch import (  # noqa: E402
 from .config import (  # noqa: E402
     get_github_token,
     get_github_tokens,
+    get_gitlab_token,
+    get_gitlab_tokens,
     get_openai_api_key,
     get_openai_base_url,
     validate_owner_repo,
@@ -42,20 +44,26 @@ from .github import (  # noqa: E402
     fetch_pr_with_rotation,
     update_complexity_label,
 )
+from .gitlab import (  # noqa: E402
+    GitLabAPIError,
+    fetch_mr,
+    fetch_mr_with_rotation,
+)
 from .io_safety import normalize_path, write_json_atomic  # noqa: E402
 from .llm import LLMError, OpenAIProvider  # noqa: E402
 from .logging_config import get_logger, setup_logging  # noqa: E402
 from .preprocess import make_prompt_input, process_diff  # noqa: E402
 from .scoring import InvalidResponseError  # noqa: E402
-from .utils import parse_pr_url  # noqa: E402
+from .utils import parse_mr_url, parse_pr_url  # noqa: E402
 
-app = typer.Typer(help="Analyze GitHub PR complexity using LLMs")
+app = typer.Typer(help="Analyze GitHub PR / GitLab MR complexity using LLMs")
 
 # Initialize logger
 logger = get_logger()
 
 # Keep regex for direct URL validation in main callback
 _OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
+_GITLAB_MR_RE = re.compile(r"https?://([^/\s]+)/(.+?)/-/merge_requests/(\d+)")
 
 
 def analyze_pr_to_dict(
@@ -71,15 +79,16 @@ def analyze_pr_to_dict(
     progress_callback: Optional[Callable[[str], None]] = None,
     token_rotator: Optional[TokenRotator] = None,
     base_url: Optional[str] = None,
+    gitlab_token: Optional[str] = None,
 ) -> dict:
     """
-    Analyze a GitHub PR and return result as dictionary.
+    Analyze a GitHub PR or GitLab MR and return result as dictionary.
 
     This is the core analysis function that can be reused by both single PR
-    and batch analysis workflows.
+    and batch analysis workflows. Auto-detects GitHub vs GitLab from the URL.
 
     Args:
-        pr_url: GitHub PR URL
+        pr_url: GitHub PR URL or GitLab MR URL
         prompt_text: Prompt text for LLM
         github_token: GitHub API token (optional, ignored if token_rotator is provided)
         openai_key: OpenAI API key (required)
@@ -87,9 +96,11 @@ def analyze_pr_to_dict(
         timeout: Request timeout in seconds
         max_tokens: Maximum tokens for diff excerpt
         hunks_per_file: Maximum hunks per file
-        sleep_seconds: Sleep between GitHub API calls
+        sleep_seconds: Sleep between API calls
         progress_callback: Optional callback for progress messages (e.g., rate limit warnings)
         token_rotator: Optional TokenRotator for automatic token rotation on rate limits
+        base_url: Base URL for OpenAI-compatible API endpoint
+        gitlab_token: GitLab private token (optional, used when provider is gitlab)
 
     Returns:
         Dict with keys: score, explanation, provider, model, tokens, timestamp,
@@ -98,34 +109,66 @@ def analyze_pr_to_dict(
     Raises:
         ValueError: If PR URL is invalid
         GitHubAPIError: If GitHub API call fails
+        GitLabAPIError: If GitLab API call fails
         LLMError: If LLM call fails
         InvalidResponseError: If LLM response is invalid
     """
-    # Parse PR URL
-    owner, repo, pr = parse_pr_url(pr_url)
-    validate_owner_repo(owner, repo)
-    validate_pr_number(pr)
+    # Parse URL to detect provider
+    owner_or_project, repo, number, vcs_provider, vcs_base_url = parse_mr_url(pr_url)
 
-    # Fetch PR - use token rotator if available, otherwise use single token
-    if token_rotator:
-        diff_text, meta = fetch_pr_with_rotation(
-            owner,
-            repo,
-            pr,
-            token_rotator,
-            sleep_s=sleep_seconds,
-            progress_callback=progress_callback,
-            timeout=timeout,
-        )
+    if vcs_provider == "gitlab":
+        project_path = owner_or_project
+        mr_iid = number
+
+        # Fetch MR
+        if token_rotator:
+            diff_text, meta = fetch_mr_with_rotation(
+                project_path,
+                mr_iid,
+                token_rotator,
+                base_url=vcs_base_url,
+                sleep_s=sleep_seconds,
+                progress_callback=progress_callback,
+                timeout=timeout,
+            )
+        else:
+            diff_text, meta = fetch_mr(
+                project_path,
+                mr_iid,
+                gitlab_token,
+                base_url=vcs_base_url,
+                sleep_s=sleep_seconds,
+                progress_callback=progress_callback,
+                timeout=timeout,
+            )
+
+        repo_display = project_path
     else:
-        diff_text, meta = fetch_pr(
-            owner,
-            repo,
-            pr,
-            github_token,
-            sleep_s=sleep_seconds,
-            progress_callback=progress_callback,
-        )
+        # GitHub
+        validate_owner_repo(owner_or_project, repo)
+        validate_pr_number(number)
+
+        if token_rotator:
+            diff_text, meta = fetch_pr_with_rotation(
+                owner_or_project,
+                repo,
+                number,
+                token_rotator,
+                sleep_s=sleep_seconds,
+                progress_callback=progress_callback,
+                timeout=timeout,
+            )
+        else:
+            diff_text, meta = fetch_pr(
+                owner_or_project,
+                repo,
+                number,
+                github_token,
+                sleep_s=sleep_seconds,
+                progress_callback=progress_callback,
+            )
+
+        repo_display = f"{owner_or_project}/{repo}"
 
     title = (meta.get("title") or "").strip()
 
@@ -154,8 +197,8 @@ def analyze_pr_to_dict(
         "model": result.get("model", model),
         "tokens": result.get("tokens"),
         "timestamp": datetime.utcnow().isoformat() + "Z",
-        "repo": f"{owner}/{repo}",
-        "pr": pr,
+        "repo": repo_display,
+        "pr": number,
         "url": pr_url,
         "title": title,
     }
@@ -177,14 +220,16 @@ def _analyze_pr_impl(
     post_comment: bool = False,
     openai_api_key: Optional[str] = None,
     github_token: Optional[str] = None,
+    gitlab_token: Optional[str] = None,
     verbose: bool = False,
     base_url: Optional[str] = None,
 ):
     """
-    Analyze a GitHub PR and compute complexity score.
+    Analyze a GitHub PR or GitLab MR and compute complexity score.
 
     Environment variables:
     - GH_TOKEN or GITHUB_TOKEN: GitHub API token (optional for public repos)
+    - GITLAB_TOKEN: GitLab private token (optional for public projects)
     - OPENAI_API_KEY: OpenAI API key (required)
     """
     # Set up logging if verbose
@@ -192,13 +237,19 @@ def _analyze_pr_impl(
         setup_logging(verbose=True)
 
     try:
-        # Parse PR URL
-        owner, repo, pr = parse_pr_url(pr_url)
-        validate_owner_repo(owner, repo)
-        validate_pr_number(pr)
+        # Parse URL to detect provider
+        owner_or_project, repo, number, vcs_provider, vcs_base_url = parse_mr_url(pr_url)
+
+        if vcs_provider == "github":
+            validate_owner_repo(owner_or_project, repo)
+            validate_pr_number(number)
+            display_name = f"{owner_or_project}/{repo}#{number}"
+        else:
+            display_name = f"{owner_or_project}!{number}"
 
         # Get credentials (arg takes precedence over env)
         final_github_token = github_token or get_github_token()
+        final_gitlab_token = gitlab_token or get_gitlab_token()
         final_openai_key = openai_api_key or get_openai_api_key()
 
         if not final_openai_key:
@@ -216,16 +267,21 @@ def _analyze_pr_impl(
         except FileNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
-        # Parse PR URL for display
-        owner, repo, pr = parse_pr_url(pr_url)
 
         # Handle dry run
         if dry_run:
-            typer.echo(f"Fetching PR {owner}/{repo}#{pr}...", err=True)
+            typer.echo(f"Fetching {display_name}...", err=True)
             try:
-                diff_text, meta = fetch_pr(
-                    owner, repo, pr, final_github_token, sleep_s=sleep_seconds
-                )
+                if vcs_provider == "gitlab":
+                    diff_text, meta = fetch_mr(
+                        owner_or_project, number, final_gitlab_token,
+                        base_url=vcs_base_url, sleep_s=sleep_seconds,
+                    )
+                else:
+                    diff_text, meta = fetch_pr(
+                        owner_or_project, repo, number, final_github_token,
+                        sleep_s=sleep_seconds,
+                    )
                 title = (meta.get("title") or "").strip()
                 typer.echo(f"PR: {title}", err=True)
                 typer.echo("Processing diff...", err=True)
@@ -236,22 +292,27 @@ def _analyze_pr_impl(
                 typer.echo(f"Diff excerpt length: {len(truncated_diff)} chars", err=True)
                 typer.echo(f"Selected files: {len(selected_files)}", err=True)
                 raise typer.Exit(0)
-            except GitHubAPIError as e:
-                if e.status_code == 404:
-                    ErrorHandler.handle_github_404(owner, repo, pr, bool(final_github_token))
+            except (GitHubAPIError, GitLabAPIError) as e:
+                if isinstance(e, GitHubAPIError):
+                    if e.status_code == 404:
+                        ErrorHandler.handle_github_404(
+                            owner_or_project, repo, number, bool(final_github_token)
+                        )
+                    else:
+                        ErrorHandler.handle_github_error(e)
                 else:
-                    ErrorHandler.handle_github_error(e)
+                    typer.echo(f"GitLab API error: {e}", err=True)
                 raise typer.Exit(1)
             except typer.Exit:
                 # Re-raise typer.Exit (success case) without catching it
                 raise
             except (ValueError, RuntimeError) as e:
-                typer.echo(f"Failed to fetch PR: {e}", err=True)
+                typer.echo(f"Failed to fetch PR/MR: {e}", err=True)
                 logger.debug("Fetch error", exc_info=True)
                 raise typer.Exit(1)
 
-        # Analyze PR
-        typer.echo(f"Fetching PR {owner}/{repo}#{pr}...", err=True)
+        # Analyze PR/MR
+        typer.echo(f"Fetching {display_name}...", err=True)
         try:
             output = analyze_pr_to_dict(
                 pr_url=pr_url,
@@ -264,15 +325,21 @@ def _analyze_pr_impl(
                 hunks_per_file=hunks_per_file,
                 sleep_seconds=sleep_seconds,
                 base_url=base_url,
+                gitlab_token=final_gitlab_token,
             )
             typer.echo(f"PR: {output['title']}", err=True)
             typer.echo("Processing diff...", err=True)
             typer.echo("Analyzing complexity with LLM...", err=True)
-        except GitHubAPIError as e:
-            if e.status_code == 404:
-                ErrorHandler.handle_github_404(owner, repo, pr, bool(final_github_token))
+        except (GitHubAPIError, GitLabAPIError) as e:
+            if isinstance(e, GitHubAPIError):
+                if e.status_code == 404:
+                    ErrorHandler.handle_github_404(
+                        owner_or_project, repo, number, bool(final_github_token)
+                    )
+                else:
+                    ErrorHandler.handle_github_error(e)
             else:
-                ErrorHandler.handle_github_error(e)
+                typer.echo(f"GitLab API error: {e}", err=True)
             raise typer.Exit(1)
         except LLMError as e:
             ErrorHandler.handle_llm_error(e)
@@ -381,7 +448,7 @@ def get_pr_url_from_context() -> Optional[str]:
 @app.command(name="analyze-pr")
 def analyze_pr(
     pr_url: Optional[str] = typer.Argument(
-        None, help="GitHub PR URL. If not provided, will try to infer from GitHub Actions context."
+        None, help="GitHub PR or GitLab MR URL. If not provided, will try to infer from GitHub Actions context."
     ),
     prompt_file: Optional[Path] = typer.Option(
         None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
@@ -406,12 +473,13 @@ def analyze_pr(
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch PR but don't call LLM"),
     openai_api_key: Optional[str] = typer.Option(None, "--openai-api-key", help="OpenAI API key"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub token"),
+    gitlab_token: Optional[str] = typer.Option(None, "--gitlab-token", help="GitLab private token"),
     api_base_url: Optional[str] = typer.Option(
         None, "--api-base-url", help="Base URL for OpenAI-compatible API endpoint"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
-    """Analyze a GitHub PR and compute complexity score."""
+    """Analyze a GitHub PR or GitLab MR and compute complexity score."""
     final_pr_url = pr_url
     if not final_pr_url:
         typer.echo(
@@ -437,6 +505,7 @@ def analyze_pr(
         dry_run=dry_run,
         openai_api_key=openai_api_key,
         github_token=github_token,
+        gitlab_token=gitlab_token,
         verbose=verbose,
         base_url=api_base_url or get_openai_base_url(),
     )
@@ -509,6 +578,9 @@ def batch_analyze(
         "--github-tokens",
         help="Comma-separated list of GitHub tokens for rotation on rate limits. "
         "Can also be set via GH_TOKENS or GITHUB_TOKENS environment variables.",
+    ),
+    gitlab_token: Optional[str] = typer.Option(
+        None, "--gitlab-token", help="GitLab private token (can also be set via GITLAB_TOKEN)"
     ),
 ):
     """
@@ -663,6 +735,9 @@ def batch_analyze(
             """Display progress messages."""
             typer.echo(msg, err=True)
 
+        # Resolve GitLab token
+        final_gitlab_token = gitlab_token or get_gitlab_token()
+
         def analyze_fn(pr_url: str) -> dict:
             """Wrapper for analyze_pr_to_dict that handles errors."""
             return analyze_pr_to_dict(
@@ -678,6 +753,7 @@ def batch_analyze(
                 progress_callback=progress_msg,
                 token_rotator=token_rotator,
                 base_url=final_base_url,
+                gitlab_token=final_gitlab_token,
             )
 
         # Validate workers
@@ -967,8 +1043,8 @@ def main(ctx: typer.Context):
 
     # Check if first arg looks like a URL
     first_arg = ctx.args[0]
-    if not _OWNER_REPO_RE.match(first_arg):
-        typer.echo(f"Error: Invalid PR URL: {first_arg}", err=True)
+    if not _OWNER_REPO_RE.match(first_arg) and not _GITLAB_MR_RE.match(first_arg):
+        typer.echo(f"Error: Invalid PR/MR URL: {first_arg}", err=True)
         typer.echo("Usage: complexity-cli analyze-pr <PR_URL>", err=True)
         typer.echo("   or: complexity-cli <PR_URL>", err=True)
         raise typer.Exit(1)

@@ -19,6 +19,7 @@ from .github import (
     search_prs,
     update_complexity_label,
 )
+from .gitlab import GitLabAPIError
 from .csv_handler import CSVBatchWriter
 from .io_safety import normalize_path, read_text_file
 from .utils import parse_pr_url
@@ -496,7 +497,7 @@ def run_batch_analysis(
 
                     if error:
                         # Handle 404 errors (PR not found) with a clearer message
-                        if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                        if isinstance(error, (GitHubAPIError, GitLabAPIError)) and error.status_code == 404:
                             typer.echo(
                                 f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                 err=True,
@@ -538,7 +539,7 @@ def run_batch_analysis(
 
                             if error:
                                 # Handle 404 errors (PR not found) with a clearer message
-                                if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                                if isinstance(error, (GitHubAPIError, GitLabAPIError)) and error.status_code == 404:
                                     typer.echo(
                                         f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                         err=True,
@@ -723,7 +724,7 @@ def run_batch_analysis_with_labels(
 
                     if error:
                         failed_count[0] += 1
-                        if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                        if isinstance(error, (GitHubAPIError, GitLabAPIError)) and error.status_code == 404:
                             typer.echo(
                                 f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                 err=True,
@@ -774,7 +775,7 @@ def run_batch_analysis_with_labels(
                             if error:
                                 with completed_lock:
                                     failed_count[0] += 1
-                                if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                                if isinstance(error, (GitHubAPIError, GitLabAPIError)) and error.status_code == 404:
                                     typer.echo(
                                         f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                         err=True,
