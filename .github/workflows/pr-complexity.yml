@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
+    inputs:
+      since:
+        description: 'Start date (YYYY-MM-DD) for backfill. If empty, uses --since-minutes.'
+        required: false
+      until:
+        description: 'End date (YYYY-MM-DD) for backfill. If empty, uses --since-minutes.'
+        required: false
 
 jobs:
   label-prs:
@@ -26,10 +33,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          if [ -n "${{ inputs.since }}" ] && [ -n "${{ inputs.until }}" ]; then
+            DATE_ARGS="--since ${{ inputs.since }} --until ${{ inputs.until }}"
+          else
+            DATE_ARGS="--since-minutes 40"
+          fi
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state open \
-            --since-minutes 40 \
+            $DATE_ARGS \
             --label \
             --workers 5
 
@@ -38,10 +50,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          if [ -n "${{ inputs.since }}" ] && [ -n "${{ inputs.until }}" ]; then
+            DATE_ARGS="--since ${{ inputs.since }} --until ${{ inputs.until }}"
+          else
+            DATE_ARGS="--since-minutes 40"
+          fi
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state closed \
-            --since-minutes 40 \
+            $DATE_ARGS \
             --label \
             --force \
             --workers 5
