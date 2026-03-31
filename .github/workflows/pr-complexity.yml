@@ -29,7 +29,7 @@ jobs:
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state open \
-            --since-minutes 20 \
+            --since-minutes 40 \
             --label \
             --workers 5
 
@@ -41,7 +41,7 @@ jobs:
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state closed \
-            --since-minutes 20 \
+            --since-minutes 40 \
             --label \
             --force \
             --workers 5
