@@ -55,10 +55,14 @@ jobs:
           else
             DATE_ARGS="--since-minutes 40"
           fi
+          FORCE_FLAG=""
+          if [ -z "${{ inputs.since }}" ]; then
+            FORCE_FLAG="--force"
+          fi
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state closed \
             $DATE_ARGS \
             --label \
-            --force \
+            $FORCE_FLAG \
             --workers 5
