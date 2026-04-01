@@ -11,6 +11,15 @@ on:
       until:
         description: 'End date (YYYY-MM-DD) for backfill. If empty, uses --since-minutes.'
         required: false
+      state:
+        description: 'PR state to process: both, open, or closed'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - open
+          - closed
 
 jobs:
   label-prs:
@@ -29,6 +38,7 @@ jobs:
         run: pip install -e .
 
       - name: Label open PRs (skip already-labeled)
+        if: ${{ inputs.state == 'both' || inputs.state == 'open' || github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -46,6 +56,7 @@ jobs:
             --workers 5
 
       - name: Label closed PRs (re-label)
+        if: ${{ inputs.state == 'both' || inputs.state == 'closed' || github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
