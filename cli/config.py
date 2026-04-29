@@ -50,6 +50,39 @@ def get_github_tokens() -> List[str]:
     return []
 
 
+def get_gitlab_token() -> Optional[str]:
+    """Get GitLab token from environment.
+
+    Checks GL_TOKEN first, then GITLAB_TOKEN.
+    """
+    return os.getenv("GL_TOKEN") or os.getenv("GITLAB_TOKEN")
+
+
+def get_gitlab_tokens() -> List[str]:
+    """Get multiple GitLab tokens from environment.
+
+    Checks GL_TOKENS / GITLAB_TOKENS first (comma-separated), then falls back to single token.
+
+    Returns:
+        List of GitLab tokens (empty list if none found)
+    """
+    tokens_str = os.getenv("GL_TOKENS") or os.getenv("GITLAB_TOKENS")
+    if tokens_str:
+        tokens = []
+        for line in tokens_str.replace("\n", ",").split(","):
+            token = line.strip()
+            if token:
+                tokens.append(token)
+        if tokens:
+            return tokens
+
+    single_token = get_gitlab_token()
+    if single_token:
+        return [single_token]
+
+    return []
+
+
 def get_openai_api_key() -> Optional[str]:
     """Get OpenAI API key from environment."""
     return os.getenv("OPENAI_API_KEY")

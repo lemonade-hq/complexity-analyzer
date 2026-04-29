@@ -32,6 +32,7 @@ class AnalysisConfig:
 
     # Credentials (optional - can be provided at runtime)
     github_token: Optional[str] = None
+    gitlab_token: Optional[str] = None
     openai_key: Optional[str] = None
 
     # Token rotation (optional)
