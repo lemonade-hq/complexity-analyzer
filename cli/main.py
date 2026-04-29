@@ -586,6 +586,9 @@ def batch_analyze(
     gitlab_token: Optional[str] = typer.Option(
         None, "--gitlab-token", help="GitLab private token (can also be set via GITLAB_TOKEN)"
     ),
+    no_verify_ssl: bool = typer.Option(
+        False, "--no-verify-ssl", help="Disable SSL certificate verification for API requests"
+    ),
 ):
     """
     Batch analyze multiple PRs from a file or date range.
@@ -611,6 +614,9 @@ def batch_analyze(
     for higher throughput when processing large batches of PRs.
     """
     try:
+        if no_verify_ssl:
+            os.environ["SSL_NO_VERIFY"] = "1"
+
         # Validate inputs
         if input_file and (org or since or until or since_minutes):
             typer.echo("Error: Cannot specify both --input-file and date range options", err=True)

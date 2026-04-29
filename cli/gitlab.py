@@ -8,11 +8,11 @@ from urllib.parse import quote
 
 import httpx
 
-from .constants import DEFAULT_TIMEOUT, DEFAULT_SLEEP_SECONDS, GITLAB_PER_PAGE
+from .constants import DEFAULT_TIMEOUT, DEFAULT_SLEEP_SECONDS, GITLAB_DIFFS_PER_PAGE, GITLAB_PER_PAGE
 from .github import TokenRotator
 
 # Re-use redact_token from utils
-from .utils import redact_token
+from .utils import redact_token, ssl_verify_enabled
 
 logger = logging.getLogger("complexity-cli")
 
@@ -128,14 +128,14 @@ def _fetch_mr_diffs_raw(
         all_diffs: List[Dict[str, Any]] = []
         page = 1
         while True:
-            params = {"per_page": GITLAB_PER_PAGE, "page": page}
+            params = {"per_page": GITLAB_DIFFS_PER_PAGE, "page": page}
             response = c.get(url, headers=headers, params=params)
             response.raise_for_status()
             page_data = response.json()
             if not page_data:
                 break
             all_diffs.extend(page_data)
-            if len(page_data) < GITLAB_PER_PAGE:
+            if len(page_data) < GITLAB_DIFFS_PER_PAGE:
                 break
             page += 1
         return all_diffs
@@ -143,7 +143,7 @@ def _fetch_mr_diffs_raw(
     try:
         if client:
             return _do_fetch(client)
-        with httpx.Client(timeout=timeout) as c:
+        with httpx.Client(timeout=timeout, verify=ssl_verify_enabled()) as c:
             return _do_fetch(c)
     except httpx.HTTPStatusError as e:
         raise GitLabAPIError(
@@ -189,7 +189,7 @@ def _fetch_mr_details(
     try:
         if client:
             return _do_fetch(client)
-        with httpx.Client(timeout=timeout) as c:
+        with httpx.Client(timeout=timeout, verify=ssl_verify_enabled()) as c:
             return _do_fetch(c)
     except httpx.HTTPStatusError as e:
         raise GitLabAPIError(
@@ -259,7 +259,7 @@ def fetch_mr(
     validate_project_path(project_path)
     validate_mr_iid(mr_iid)
 
-    with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout, verify=ssl_verify_enabled()) as client:
         # Fetch diffs once
         diffs_raw = _fetch_mr_diffs_raw(project_path, mr_iid, token, base_url, timeout, client)
         diff_text = _diff_from_gitlab_diffs(diffs_raw)

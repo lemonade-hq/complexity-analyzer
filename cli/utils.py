@@ -1,6 +1,7 @@
 """Shared utilities for the CLI."""
 
 import logging
+import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -172,3 +173,13 @@ def redact_token(token: str, visible_chars: int = TOKEN_VISIBLE_CHARS) -> str:
     if len(token) <= visible_chars:
         return "*" * len(token)
     return token[:visible_chars] + "..."
+
+
+def ssl_verify_enabled() -> bool:
+    """Check whether SSL verification is enabled.
+
+    Returns False when the SSL_NO_VERIFY environment variable is set to a
+    truthy value (1, true, yes).
+    """
+    val = os.environ.get("SSL_NO_VERIFY", "").lower()
+    return val not in ("1", "true", "yes")
