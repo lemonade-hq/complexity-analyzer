@@ -1,7 +1,7 @@
 """Tests for GitLab module."""
 
 import pytest
-from unittest.mock import patch, Mock, call
+from unittest.mock import patch, Mock
 
 from cli.gitlab import (
     GitLabAPIError,
@@ -211,8 +211,9 @@ class TestFetchMrDiffsRaw:
 
     @patch("cli.gitlab.httpx.Client")
     def test_single_page(self, mock_client_class):
-        """Test fetching diffs that fit in a single page."""
-        diffs = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(30)]
+        """Test fetching diffs that fit in a single page (less than per-page cap)."""
+        # Less than GITLAB_DIFFS_PER_PAGE (20) so pagination stops after page 1
+        diffs = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(10)]
 
         mock_response = Mock()
         mock_response.json.return_value = diffs
@@ -225,14 +226,15 @@ class TestFetchMrDiffsRaw:
         mock_client_class.return_value = mock_client
 
         result = _fetch_mr_diffs_raw("group/repo", 1, token="token")
-        assert len(result) == 30
+        assert len(result) == 10
         assert mock_client.get.call_count == 1
 
     @patch("cli.gitlab.httpx.Client")
     def test_multi_page_pagination(self, mock_client_class):
         """Test that multiple pages are fetched until an incomplete page."""
-        page1 = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(100)]
-        page2 = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(100, 130)]
+        # First page is full (= per-page cap), second page is partial (< cap) so pagination stops
+        page1 = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(20)]
+        page2 = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(20, 30)]
 
         resp1 = Mock()
         resp1.json.return_value = page1
@@ -249,13 +251,14 @@ class TestFetchMrDiffsRaw:
         mock_client_class.return_value = mock_client
 
         result = _fetch_mr_diffs_raw("group/repo", 1, token="token")
-        assert len(result) == 130
+        assert len(result) == 30
         assert mock_client.get.call_count == 2
 
     @patch("cli.gitlab.httpx.Client")
     def test_stops_on_empty_page(self, mock_client_class):
         """Test that pagination stops when an empty page is returned."""
-        page1 = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(100)]
+        # Full page so the loop continues; empty page on the next call triggers the break
+        page1 = [{"new_path": f"file{i}.py", "diff": "content"} for i in range(20)]
 
         resp1 = Mock()
         resp1.json.return_value = page1
@@ -272,7 +275,7 @@ class TestFetchMrDiffsRaw:
         mock_client_class.return_value = mock_client
 
         result = _fetch_mr_diffs_raw("group/repo", 1, token="token")
-        assert len(result) == 100
+        assert len(result) == 20
 
     @patch("cli.gitlab.httpx.Client")
     def test_http_error_raises_gitlab_api_error(self, mock_client_class):

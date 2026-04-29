@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .constants import DEFAULT_TIMEOUT, DEFAULT_SLEEP_SECONDS, GITLAB_DIFFS_PER_PAGE, GITLAB_PER_PAGE
+from .constants import DEFAULT_TIMEOUT, DEFAULT_SLEEP_SECONDS, GITLAB_DIFFS_PER_PAGE
 from .github import TokenRotator
 
 # Re-use redact_token from utils
@@ -223,12 +223,14 @@ def _normalize_gitlab_diffs(diffs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         else:
             status = "modified"
 
-        files.append({
-            "filename": filename,
-            "patch": patch,
-            "status": status,
-            "previous_filename": d.get("old_path") if d.get("renamed_file") else None,
-        })
+        files.append(
+            {
+                "filename": filename,
+                "patch": patch,
+                "status": status,
+                "previous_filename": d.get("old_path") if d.get("renamed_file") else None,
+            }
+        )
     return files
 
 

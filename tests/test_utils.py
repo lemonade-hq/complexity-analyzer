@@ -112,9 +112,7 @@ class TestParseMrUrl:
 
     def test_gitlab_http_scheme(self):
         """Test parsing a GitLab URL with http scheme."""
-        _, _, _, _, base_url = parse_mr_url(
-            "http://gitlab.internal/group/repo/-/merge_requests/1"
-        )
+        _, _, _, _, base_url = parse_mr_url("http://gitlab.internal/group/repo/-/merge_requests/1")
         assert base_url == "http://gitlab.internal"
 
     def test_invalid_url(self):
@@ -129,9 +127,7 @@ class TestParseMrUrl:
 
     def test_trailing_whitespace(self):
         """Test that trailing whitespace is handled."""
-        owner, _, number, provider, _ = parse_mr_url(
-            "  https://github.com/owner/repo/pull/1  "
-        )
+        owner, _, number, provider, _ = parse_mr_url("  https://github.com/owner/repo/pull/1  ")
         assert owner == "owner"
         assert number == 1
         assert provider == "github"

@@ -268,12 +268,18 @@ def _analyze_pr_impl(
             try:
                 if vcs_provider == "gitlab":
                     diff_text, meta = fetch_mr(
-                        owner_or_project, number, final_gitlab_token,
-                        base_url=vcs_base_url, sleep_s=sleep_seconds,
+                        owner_or_project,
+                        number,
+                        final_gitlab_token,
+                        base_url=vcs_base_url,
+                        sleep_s=sleep_seconds,
                     )
                 else:
                     diff_text, meta = fetch_pr(
-                        owner_or_project, repo, number, final_github_token,
+                        owner_or_project,
+                        repo,
+                        number,
+                        final_github_token,
                         sleep_s=sleep_seconds,
                     )
                 title = (meta.get("title") or "").strip()
@@ -452,7 +458,8 @@ def get_pr_url_from_context() -> Optional[str]:
 @app.command(name="analyze-pr")
 def analyze_pr(
     pr_url: Optional[str] = typer.Argument(
-        None, help="GitHub PR or GitLab MR URL. If not provided, will try to infer from GitHub Actions context."
+        None,
+        help="GitHub PR or GitLab MR URL. If not provided, will try to infer from GitHub Actions context.",
     ),
     prompt_file: Optional[Path] = typer.Option(
         None, "--prompt-file", "-p", help="Path to custom prompt file (default: embedded prompt)"
@@ -1014,9 +1021,7 @@ def label_pr(
                 explanation = output["explanation"]
                 if "\n" in explanation:
                     delimiter = "EOF"
-                    f.write(
-                        f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n"
-                    )
+                    f.write(f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n")
                 else:
                     f.write(f"explanation={explanation}\n")
 

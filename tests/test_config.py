@@ -163,9 +163,7 @@ class TestGetGitLabTokens:
         """Test that empty tokens are filtered out."""
         assert get_gitlab_tokens() == ["t1", "t2", "t3"]
 
-    @patch.dict(
-        os.environ, {"GL_TOKENS": "gl1,gl2", "GITLAB_TOKENS": "lab1,lab2"}, clear=True
-    )
+    @patch.dict(os.environ, {"GL_TOKENS": "gl1,gl2", "GITLAB_TOKENS": "lab1,lab2"}, clear=True)
     def test_gl_tokens_takes_precedence(self):
         """Test that GL_TOKENS takes precedence over GITLAB_TOKENS."""
         assert get_gitlab_tokens() == ["gl1", "gl2"]

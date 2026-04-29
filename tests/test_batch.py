@@ -3,7 +3,7 @@
 import csv
 import pytest
 from datetime import datetime
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 from cli.batch import (
     load_pr_urls_from_file,
     generate_pr_list_from_date_range,
