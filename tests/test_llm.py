@@ -206,6 +206,109 @@ class TestOpenAIProviderBaseUrl:
         mock_openai_class.assert_called_once_with(api_key="test-key", timeout=120.0, base_url=None)
 
 
+class TestOpenAIProviderRetryDiagnostics:
+    """Tests for retry behavior and error-message diagnostics."""
+
+    @patch("cli.llm.OpenAI")
+    @patch("cli.llm.time.sleep")
+    def test_does_not_retry_unicode_encode_error(self, mock_sleep, mock_openai_class):
+        """UnicodeEncodeError is deterministic; fail fast without sleeping."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = UnicodeEncodeError(
+            "ascii", "x", 0, 1, "oops"
+        )
+        mock_openai_class.return_value = mock_client
+
+        provider = OpenAIProvider("test-key")
+
+        with pytest.raises(LLMError):
+            provider.analyze_complexity(
+                prompt="Analyze",
+                diff_excerpt="diff",
+                stats_json="{}",
+                title="Title",
+                max_retries=3,
+            )
+
+        assert mock_client.chat.completions.create.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("cli.llm.OpenAI")
+    @patch("cli.llm.time.sleep")
+    def test_error_message_includes_exception_type(self, mock_sleep, mock_openai_class):
+        """LLMError message includes the underlying exception's class name."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = RuntimeError("boom")
+        mock_openai_class.return_value = mock_client
+
+        provider = OpenAIProvider("test-key")
+
+        with pytest.raises(LLMError) as exc_info:
+            provider.analyze_complexity(
+                prompt="Analyze",
+                diff_excerpt="diff",
+                stats_json="{}",
+                title="Title",
+                max_retries=1,
+            )
+
+        assert "RuntimeError" in str(exc_info.value)
+        assert "boom" in str(exc_info.value)
+
+    @patch("cli.llm.OpenAI")
+    @patch("cli.llm.time.sleep")
+    def test_chains_original_exception(self, mock_sleep, mock_openai_class):
+        """LLMError preserves __cause__ via `raise ... from e`."""
+        original = RuntimeError("boom")
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = original
+        mock_openai_class.return_value = mock_client
+
+        provider = OpenAIProvider("test-key")
+
+        with pytest.raises(LLMError) as exc_info:
+            provider.analyze_complexity(
+                prompt="Analyze",
+                diff_excerpt="diff",
+                stats_json="{}",
+                title="Title",
+                max_retries=1,
+            )
+
+        assert exc_info.value.__cause__ is original
+
+    @patch("cli.llm.OpenAI")
+    @patch("cli.llm.time.sleep")
+    def test_still_retries_transient_errors(self, mock_sleep, mock_openai_class):
+        """Transient errors (e.g. ConnectionError) keep retrying."""
+        mock_response_success = MagicMock()
+        mock_response_success.choices = [
+            MagicMock(message=MagicMock(content='{"complexity": 4, "explanation": "ok"}'))
+        ]
+        mock_response_success.usage = MagicMock(total_tokens=200)
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = [
+            ConnectionError("net"),
+            ConnectionError("net"),
+            mock_response_success,
+        ]
+        mock_openai_class.return_value = mock_client
+
+        provider = OpenAIProvider("test-key")
+        result = provider.analyze_complexity(
+            prompt="Analyze",
+            diff_excerpt="diff",
+            stats_json="{}",
+            title="Title",
+            max_retries=3,
+        )
+
+        assert result["complexity"] == 4
+        assert mock_client.chat.completions.create.call_count == 3
+        assert mock_sleep.call_count == 2
+
+
 class TestLLMError:
     """Tests for LLMError exception."""
 

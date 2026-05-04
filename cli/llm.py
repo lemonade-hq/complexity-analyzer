@@ -9,6 +9,8 @@ from .constants import DEFAULT_MODEL, DEFAULT_TIMEOUT
 from .llm_base import LLMProvider
 from .scoring import InvalidResponseError, parse_complexity_response
 
+_NON_RETRIABLE = (UnicodeEncodeError, UnicodeDecodeError, TypeError, ValueError)
+
 
 class LLMError(Exception):
     """LLM provider error."""
@@ -135,15 +137,21 @@ class OpenAIProvider(LLMProvider):
                     )
                     time.sleep(retry_delay * (2**attempt))
                     continue
-                raise LLMError(f"Failed to parse response after {max_retries} attempts: {e}")
+                raise LLMError(
+                    f"Failed to parse response after {attempt + 1} attempts: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
 
             except Exception as e:
-                if attempt < max_retries - 1:
+                if not isinstance(e, _NON_RETRIABLE) and attempt < max_retries - 1:
                     delay = retry_delay * (2**attempt)
                     # Add jitter
                     delay += (time.time() % 1) * 0.1
                     time.sleep(delay)
                     continue
-                raise LLMError(f"OpenAI API error after {max_retries} attempts: {e}")
+                raise LLMError(
+                    f"OpenAI API error after {attempt + 1} attempts: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
 
         raise LLMError(f"Failed after {max_retries} attempts")
