@@ -203,9 +203,7 @@ class TestOpenAIProviderBaseUrl:
     def test_base_url_none_by_default(self, mock_openai_class):
         """Test that base_url defaults to None (standard OpenAI endpoint)."""
         OpenAIProvider("test-key")
-        mock_openai_class.assert_called_once_with(
-            api_key="test-key", timeout=120.0, base_url=None
-        )
+        mock_openai_class.assert_called_once_with(api_key="test-key", timeout=120.0, base_url=None)
 
 
 class TestLLMError:

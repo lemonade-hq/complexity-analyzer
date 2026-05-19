@@ -2,7 +2,6 @@
 
 from cli.analyze import is_automated_sync_pr
 
-
 SYNC_TITLE = "chore(cursor): [skip-ci] synced file(s) with lemonade-hq/cursor-rules"
 SYNC_BODY = (
     "synced local file(s) with [lemonade-hq/cursor-rules](https://github.com/...).\n"

@@ -946,9 +946,7 @@ def label_pr(
                 explanation = output["explanation"]
                 if "\n" in explanation:
                     delimiter = "EOF"
-                    f.write(
-                        f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n"
-                    )
+                    f.write(f"explanation<<{delimiter}\n{explanation}\n{delimiter}\n")
                 else:
                     f.write(f"explanation={explanation}\n")
 
