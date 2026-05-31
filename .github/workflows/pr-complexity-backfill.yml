@@ -28,8 +28,10 @@ jobs:
 
       - name: Compute date range
         id: dates
+        env:
+          DAYS_INPUT: ${{ inputs.days || '2' }}
         run: |
-          DAYS="${{ inputs.days || '2' }}"
+          DAYS="$DAYS_INPUT"
           UNTIL="$(date -u +%Y-%m-%d)"
           SINCE="$(date -u -d "$((DAYS - 1)) days ago" +%Y-%m-%d)"
           echo "since=$SINCE" >> "$GITHUB_OUTPUT"
@@ -40,12 +42,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SINCE: ${{ steps.dates.outputs.since }}
+          UNTIL: ${{ steps.dates.outputs.until }}
         run: |
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state open \
-            --since ${{ steps.dates.outputs.since }} \
-            --until ${{ steps.dates.outputs.until }} \
+            --since $SINCE \
+            --until $UNTIL \
             --label \
             --workers 5
 
@@ -53,11 +57,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SINCE: ${{ steps.dates.outputs.since }}
+          UNTIL: ${{ steps.dates.outputs.until }}
         run: |
           complexity-cli batch-analyze \
             --org lemonade-hq \
             --state closed \
-            --since ${{ steps.dates.outputs.since }} \
-            --until ${{ steps.dates.outputs.until }} \
+            --since $SINCE \
+            --until $UNTIL \
             --label \
             --workers 5
