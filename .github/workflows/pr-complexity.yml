@@ -46,7 +46,7 @@ jobs:
           if [ -n "${{ inputs.since }}" ] && [ -n "${{ inputs.until }}" ]; then
             DATE_ARGS="--since ${{ inputs.since }} --until ${{ inputs.until }}"
           else
-            DATE_ARGS="--since-minutes 40"
+            DATE_ARGS="--since-minutes 120"
           fi
           complexity-cli batch-analyze \
             --org lemonade-hq \
@@ -64,7 +64,7 @@ jobs:
           if [ -n "${{ inputs.since }}" ] && [ -n "${{ inputs.until }}" ]; then
             DATE_ARGS="--since ${{ inputs.since }} --until ${{ inputs.until }}"
           else
-            DATE_ARGS="--since-minutes 40"
+            DATE_ARGS="--since-minutes 120"
           fi
           FORCE_FLAG=""
           if [ -z "${{ inputs.since }}" ]; then
