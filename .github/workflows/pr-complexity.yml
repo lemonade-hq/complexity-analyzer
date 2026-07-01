@@ -48,7 +48,7 @@ jobs:
           if [ -n "$SINCE_INPUT" ] && [ -n "$UNTIL_INPUT" ]; then
             DATE_ARGS="--since $SINCE_INPUT --until $UNTIL_INPUT"
           else
-            DATE_ARGS="--since-minutes 40"
+            DATE_ARGS="--since-minutes 120"
           fi
           complexity-cli batch-analyze \
             --org lemonade-hq \
@@ -68,7 +68,7 @@ jobs:
           if [ -n "$SINCE_INPUT" ] && [ -n "$UNTIL_INPUT" ]; then
             DATE_ARGS="--since $SINCE_INPUT --until $UNTIL_INPUT"
           else
-            DATE_ARGS="--since-minutes 40"
+            DATE_ARGS="--since-minutes 120"
           fi
           FORCE_FLAG=""
           if [ -z "$SINCE_INPUT" ]; then
