@@ -6,6 +6,7 @@ import typer
 
 if TYPE_CHECKING:
     from .github import GitHubAPIError
+    from .gitlab import GitLabAPIError
     from .llm import LLMError
 
 
@@ -60,6 +61,51 @@ class ErrorHandler:
             typer.echo(f"  Details: {error.message}", err=True)
         else:
             typer.echo(f"GitHub API error: {error}", err=True)
+
+    @staticmethod
+    def handle_gitlab_404(project_path: str, mr_iid: int, has_token: bool) -> None:
+        """
+        Handle MR not found errors with helpful hints.
+
+        Args:
+            project_path: GitLab project path
+            mr_iid: Merge request IID
+            has_token: Whether a GitLab token was provided
+        """
+        typer.echo("Error: MR not found or not accessible", err=True)
+        typer.echo(f"  Project: {project_path}, MR: !{mr_iid}", err=True)
+        if not has_token:
+            typer.echo(
+                "  Hint: If this is a private project, set GL_TOKEN or GITLAB_TOKEN",
+                err=True,
+            )
+            typer.echo("  Example: export GITLAB_TOKEN='your-token'", err=True)
+        else:
+            typer.echo(
+                "  Hint: Check that the MR exists and you have access to it",
+                err=True,
+            )
+
+    @staticmethod
+    def handle_gitlab_error(error: "GitLabAPIError") -> None:
+        """
+        Handle general GitLab API errors.
+
+        Args:
+            error: The GitLabAPIError that occurred
+        """
+        if error.status_code == 403:
+            typer.echo("Error: GitLab API access forbidden", err=True)
+            typer.echo(f"  URL: {error.url}", err=True)
+            typer.echo("  Hint: Check your token has the required permissions", err=True)
+        elif error.status_code == 401:
+            typer.echo("Error: GitLab authentication failed", err=True)
+            typer.echo("  Hint: Check that your token is valid and not expired", err=True)
+        elif error.status_code == 429:
+            typer.echo("Error: GitLab API rate limit exceeded", err=True)
+            typer.echo("  Hint: Wait before retrying or use token rotation", err=True)
+        else:
+            typer.echo(f"GitLab API error: {error}", err=True)
 
     @staticmethod
     def handle_llm_error(error: "LLMError") -> None:

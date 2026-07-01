@@ -1,12 +1,72 @@
 """Shared utilities for the CLI."""
 
+import logging
+import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .constants import GITHUB_API_VERSION, TOKEN_VISIBLE_CHARS
 
-# Regex to parse PR URL
+logger = logging.getLogger("complexity-cli")
+
+# Regex to parse GitHub PR URL
 _OWNER_REPO_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
+
+# Regex to parse GitLab MR URL (any domain with /-/merge_requests/ pattern)
+_GITLAB_MR_RE = re.compile(r"https?://([^/\s]+)/(.+?)/-/merge_requests/(\d+)")
+
+# Well-known GitLab domains that are safe to send tokens to.
+# Self-hosted domains will trigger a warning log.
+_KNOWN_GITLAB_DOMAINS: Set[str] = {"gitlab.com", "gitlab.io"}
+
+
+def parse_mr_url(url: str) -> Tuple[str, str, int, str, str]:
+    """
+    Parse a PR/MR URL, auto-detecting GitHub vs GitLab.
+
+    Args:
+        url: GitHub PR or GitLab MR URL
+
+    Returns:
+        Tuple of (owner_or_project, repo_or_empty, number, provider, base_url)
+        - For GitHub: (owner, repo, pr_number, "github", "https://github.com")
+        - For GitLab: (project_path, "", mr_iid, "gitlab", "https://gitlab.com")
+
+    Raises:
+        ValueError: If URL format is invalid or unrecognized
+    """
+    url = url.strip()
+
+    # Try GitHub first
+    m = _OWNER_REPO_RE.match(url)
+    if m:
+        owner, repo, pr_str = m.group(1), m.group(2), m.group(3)
+        return owner, repo, int(pr_str), "github", "https://github.com"
+
+    # Try GitLab (any non-github domain with /-/merge_requests/)
+    m = _GITLAB_MR_RE.match(url)
+    if m:
+        domain = m.group(1)
+        project_path = m.group(2)
+        mr_iid = m.group(3)
+        # Determine the base URL from the domain
+        # Use https by default; check if original URL used http
+        scheme = "https"
+        if url.startswith("http://"):
+            scheme = "http"
+        base_url = f"{scheme}://{domain}"
+
+        # Warn about self-hosted domains where tokens will be sent
+        if domain not in _KNOWN_GITLAB_DOMAINS:
+            logger.warning(
+                "GitLab token will be sent to non-standard domain: %s. "
+                "Ensure this is a trusted GitLab instance.",
+                domain,
+            )
+
+        return project_path, "", int(mr_iid), "gitlab", base_url
+
+    raise ValueError(f"Invalid PR URL: {url}")
 
 
 def parse_pr_url(url: str) -> Tuple[str, str, int]:
@@ -113,3 +173,13 @@ def redact_token(token: str, visible_chars: int = TOKEN_VISIBLE_CHARS) -> str:
     if len(token) <= visible_chars:
         return "*" * len(token)
     return token[:visible_chars] + "..."
+
+
+def ssl_verify_enabled() -> bool:
+    """Check whether SSL verification is enabled.
+
+    Returns False when the SSL_NO_VERIFY environment variable is set to a
+    truthy value (1, true, yes).
+    """
+    val = os.environ.get("SSL_NO_VERIFY", "").lower()
+    return val not in ("1", "true", "yes")

@@ -19,9 +19,10 @@ from .github import (
     search_prs,
     update_complexity_label,
 )
+from .gitlab import GitLabAPIError
 from .csv_handler import CSVBatchWriter
 from .io_safety import normalize_path, read_text_file
-from .utils import parse_pr_url
+from .utils import parse_mr_url
 
 # Get logger
 logger = logging.getLogger("complexity-cli")
@@ -496,7 +497,10 @@ def run_batch_analysis(
 
                     if error:
                         # Handle 404 errors (PR not found) with a clearer message
-                        if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                        if (
+                            isinstance(error, (GitHubAPIError, GitLabAPIError))
+                            and error.status_code == 404
+                        ):
                             typer.echo(
                                 f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                 err=True,
@@ -538,7 +542,10 @@ def run_batch_analysis(
 
                             if error:
                                 # Handle 404 errors (PR not found) with a clearer message
-                                if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                                if (
+                                    isinstance(error, (GitHubAPIError, GitLabAPIError))
+                                    and error.status_code == 404
+                                ):
                                     typer.echo(
                                         f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                         err=True,
@@ -622,9 +629,13 @@ def run_batch_analysis_with_labels(
                 typer.echo(f"  Checked {idx}/{len(pr_urls)} PRs...", err=True)
 
             try:
-                owner, repo, pr = parse_pr_url(pr_url)
+                owner_or_project, repo, number, provider, _ = parse_mr_url(pr_url)
+                if provider == "gitlab":
+                    # GitLab labeling not supported; include for analysis
+                    unlabeled_urls.append(pr_url)
+                    continue
                 existing_label = has_complexity_label(
-                    owner, repo, pr, github_token, label_prefix, timeout
+                    owner_or_project, repo, number, github_token, label_prefix, timeout
                 )
                 if existing_label:
                     already_labeled += 1
@@ -692,13 +703,25 @@ def run_batch_analysis_with_labels(
 
             label_applied = None
 
-            # Apply label if requested
+            # Apply label if requested (GitHub only)
             if label_prs and github_token:
                 try:
-                    owner, repo, pr = parse_pr_url(pr_url)
-                    label_applied = update_complexity_label(
-                        owner, repo, pr, complexity, github_token, label_prefix, timeout
-                    )
+                    owner_or_project, repo, number, provider, _ = parse_mr_url(pr_url)
+                    if provider == "github":
+                        label_applied = update_complexity_label(
+                            owner_or_project,
+                            repo,
+                            number,
+                            complexity,
+                            github_token,
+                            label_prefix,
+                            timeout,
+                        )
+                    else:
+                        typer.echo(
+                            f"  Note: Labeling not supported for GitLab MRs, skipping label for {pr_url}",
+                            err=True,
+                        )
                 except Exception as label_error:
                     typer.echo(
                         f"  Warning: Failed to apply label to {pr_url}: {label_error}", err=True
@@ -723,7 +746,10 @@ def run_batch_analysis_with_labels(
 
                     if error:
                         failed_count[0] += 1
-                        if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                        if (
+                            isinstance(error, (GitHubAPIError, GitLabAPIError))
+                            and error.status_code == 404
+                        ):
                             typer.echo(
                                 f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                 err=True,
@@ -774,7 +800,10 @@ def run_batch_analysis_with_labels(
                             if error:
                                 with completed_lock:
                                     failed_count[0] += 1
-                                if isinstance(error, GitHubAPIError) and error.status_code == 404:
+                                if (
+                                    isinstance(error, (GitHubAPIError, GitLabAPIError))
+                                    and error.status_code == 404
+                                ):
                                     typer.echo(
                                         f"⚠ Skipping {pr_url_result}: PR not found or inaccessible (404)",
                                         err=True,

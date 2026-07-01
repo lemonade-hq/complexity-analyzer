@@ -10,6 +10,7 @@ from cli.batch import (
     load_completed_prs,
     write_csv_row,
     run_batch_analysis,
+    run_batch_analysis_with_labels,
 )
 
 
@@ -215,3 +216,87 @@ def test_run_batch_analysis_resume(mock_typer, tmp_path):
         reader = csv.DictReader(f)
         rows = list(reader)
         assert len(rows) == 2
+
+
+@patch("cli.batch.typer")
+def test_batch_analysis_with_gitlab_urls(mock_typer, tmp_path):
+    """Test that batch analysis works with GitLab MR URLs."""
+    output_file = tmp_path / "results.csv"
+
+    pr_urls = [
+        "https://gitlab.com/group/repo/-/merge_requests/1",
+        "https://github.com/owner/repo/pull/123",
+    ]
+
+    def analyze_fn(url):
+        return {"score": 7, "explanation": f"Analysis for {url}"}
+
+    run_batch_analysis(pr_urls, output_file, analyze_fn, resume=False)
+
+    assert output_file.exists()
+    with output_file.open("r") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        assert len(rows) == 2
+
+
+@patch("cli.batch.has_complexity_label")
+@patch("cli.batch.typer")
+def test_batch_labels_skips_gitlab_for_label_check(mock_typer, mock_has_label, tmp_path):
+    """Test that label checking skips GitLab URLs gracefully."""
+    output_file = tmp_path / "results.csv"
+
+    pr_urls = [
+        "https://gitlab.com/group/repo/-/merge_requests/1",
+        "https://github.com/owner/repo/pull/123",
+    ]
+
+    # Only the GitHub URL should be checked for existing labels
+    mock_has_label.return_value = None
+
+    def analyze_fn(url):
+        return {"score": 5, "explanation": "test"}
+
+    run_batch_analysis_with_labels(
+        pr_urls=pr_urls,
+        output_file=output_file,
+        analyze_fn=analyze_fn,
+        label_prs=True,
+        github_token="token",
+        resume=False,
+    )
+
+    # has_complexity_label should only be called for the GitHub URL
+    assert mock_has_label.call_count == 1
+    call_args = mock_has_label.call_args
+    assert call_args[0][0] == "owner"  # owner
+    assert call_args[0][1] == "repo"  # repo
+
+
+@patch("cli.batch.update_complexity_label")
+@patch("cli.batch.typer")
+def test_batch_labels_skips_gitlab_for_labeling(mock_typer, mock_update_label, tmp_path):
+    """Test that labeling is skipped for GitLab MR URLs."""
+    output_file = tmp_path / "results.csv"
+
+    pr_urls = [
+        "https://gitlab.com/group/repo/-/merge_requests/1",
+    ]
+
+    mock_update_label.return_value = "complexity:5"
+
+    def analyze_fn(url):
+        return {"score": 5, "explanation": "test"}
+
+    run_batch_analysis_with_labels(
+        pr_urls=pr_urls,
+        output_file=output_file,
+        analyze_fn=analyze_fn,
+        label_prs=True,
+        github_token="token",
+        resume=False,
+        force=True,
+    )
+
+    # update_complexity_label should NOT be called for GitLab URLs
+    mock_update_label.assert_not_called()
