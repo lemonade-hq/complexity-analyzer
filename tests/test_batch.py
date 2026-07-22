@@ -2,6 +2,7 @@
 
 import csv
 import pytest
+import typer
 from datetime import datetime
 from unittest.mock import patch
 from cli.batch import (
@@ -10,6 +11,7 @@ from cli.batch import (
     load_completed_prs,
     write_csv_row,
     run_batch_analysis,
+    run_batch_analysis_with_labels,
 )
 
 
@@ -215,3 +217,45 @@ def test_run_batch_analysis_resume(mock_typer, tmp_path):
         reader = csv.DictReader(f)
         rows = list(reader)
         assert len(rows) == 2
+
+
+def test_batch_fails_on_partial_processing_error():
+    """A single failed PR must make a labeling batch fail."""
+    pr_urls = [
+        "https://github.com/owner/repo/pull/123",
+        "https://github.com/owner/repo/pull/124",
+    ]
+
+    def analyze_fn(url):
+        if url.endswith("/124"):
+            raise RuntimeError("not accessible")
+        return {"score": 5, "explanation": "Analysis"}
+
+    with pytest.raises(typer.Exit) as exc_info:
+        run_batch_analysis_with_labels(
+            pr_urls,
+            output_file=None,
+            analyze_fn=analyze_fn,
+            label_prs=False,
+            workers=1,
+        )
+
+    assert exc_info.value.exit_code == 1
+
+
+@patch("cli.batch.update_complexity_label", side_effect=RuntimeError("label denied"))
+def test_label_batch_fails_when_label_update_fails(mock_update_label):
+    """A failed label write must not be reported as successful analysis."""
+    with pytest.raises(typer.Exit) as exc_info:
+        run_batch_analysis_with_labels(
+            ["https://github.com/owner/repo/pull/123"],
+            output_file=None,
+            analyze_fn=lambda _url: {"score": 5, "explanation": "Analysis"},
+            label_prs=True,
+            github_token="token",
+            force=True,
+            workers=1,
+        )
+
+    assert exc_info.value.exit_code == 1
+    mock_update_label.assert_called_once()

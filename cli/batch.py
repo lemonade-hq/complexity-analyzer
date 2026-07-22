@@ -694,15 +694,10 @@ def run_batch_analysis_with_labels(
 
             # Apply label if requested
             if label_prs and github_token:
-                try:
-                    owner, repo, pr = parse_pr_url(pr_url)
-                    label_applied = update_complexity_label(
-                        owner, repo, pr, complexity, github_token, label_prefix, timeout
-                    )
-                except Exception as label_error:
-                    typer.echo(
-                        f"  Warning: Failed to apply label to {pr_url}: {label_error}", err=True
-                    )
+                owner, repo, pr = parse_pr_url(pr_url)
+                label_applied = update_complexity_label(
+                    owner, repo, pr, complexity, github_token, label_prefix, timeout
+                )
 
             return pr_url, complexity, explanation, label_applied, None
         except Exception as e:
@@ -826,9 +821,10 @@ def run_batch_analysis_with_labels(
             f"\n⚠ {failed_count[0]}/{remaining_count} PRs failed during processing", err=True
         )
 
-    # Exit non-zero if ALL PRs failed (partial success is still success)
-    if remaining_count > 0 and completed_count[0] == 0:
-        typer.echo("Error: All PRs failed to process", err=True)
+    # A partial batch is not a successful labeling run. Fail closed so authorization
+    # gaps and per-repository errors cannot be hidden behind a green workflow.
+    if failed_count[0] > 0:
+        typer.echo("Error: One or more PRs failed to process", err=True)
         raise typer.Exit(1)
 
     # Summary
