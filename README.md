@@ -326,6 +326,7 @@ The backfill workflow accepts a `days` input to control how far back it searches
 
 **Required Repository Variable:**
 - `COMPLEXITY_APP_CLIENT_ID`: Client ID of the organization-wide Complexity Analyzer GitHub App
+- `COMPLEXITY_APP_INSTALLATION_ID`: Installation ID used to verify the generated token
 
 **Required Secrets:**
 - `COMPLEXITY_APP_PRIVATE_KEY`: Private key generated for the Complexity Analyzer GitHub App

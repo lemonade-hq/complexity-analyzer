@@ -43,21 +43,25 @@ jobs:
       - name: Verify org-wide App access
         env:
           GH_TOKEN: ${{ steps.complexity-app-token.outputs.token }}
+          APP_SLUG: ${{ steps.complexity-app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.complexity-app-token.outputs.installation-id }}
+          EXPECTED_INSTALLATION_ID: ${{ vars.COMPLEXITY_APP_INSTALLATION_ID }}
         run: |
-          installation="$(gh api /installation)"
-          app_slug="$(jq -r '.app_slug' <<< "$installation")"
-          repository_selection="$(jq -r '.repository_selection' <<< "$installation")"
-
-          if [ "$app_slug" != "lemonade-complexity-analyzer" ]; then
-            echo "Expected lemonade-complexity-analyzer, got $app_slug"
+          if [ "$APP_SLUG" != "lemonade-complexity-analyzer" ]; then
+            echo "Expected lemonade-complexity-analyzer, got $APP_SLUG"
             exit 1
           fi
-          if [ "$repository_selection" != "all" ]; then
-            echo "GitHub App must be installed on all repositories; got $repository_selection"
+          if [ "$INSTALLATION_ID" != "$EXPECTED_INSTALLATION_ID" ]; then
+            echo "Expected installation $EXPECTED_INSTALLATION_ID, got $INSTALLATION_ID"
             exit 1
           fi
 
-          # Fail before analysis if the token cannot read PRs outside this repository.
+          # Validate effective access, not just the installation's configured selection.
+          repository_count="$(gh api /installation/repositories --jq '.total_count')"
+          if [ "$repository_count" -le 1 ]; then
+            echo "Expected org-wide repository access, got $repository_count repository"
+            exit 1
+          fi
           gh api "repos/lemonade-hq/lemonade/pulls?state=all&per_page=1" >/dev/null
 
       - name: Set up Python
