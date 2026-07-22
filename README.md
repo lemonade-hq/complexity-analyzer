@@ -332,7 +332,7 @@ The backfill workflow accepts a `days` input to control how far back it searches
 - `COMPLEXITY_APP_PRIVATE_KEY`: Private key generated for the Complexity Analyzer GitHub App
 - `OPENAI_API_KEY`: OpenAI API key for LLM analysis
 
-The GitHub App must be installed for the target organization repositories with pull requests read access and issues read/write access. The workflows generate a short-lived installation token for each run.
+The GitHub App must be installed for all target organization repositories with pull requests and issues read/write access. Pull requests write access is required because GitHub authorizes label changes on PR resources against that permission, even though labels use the Issues API. The workflows generate a short-lived installation token for each run.
 
 ### Single PR Analysis in CI
 

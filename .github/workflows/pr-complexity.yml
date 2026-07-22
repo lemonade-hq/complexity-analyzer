@@ -38,7 +38,7 @@ jobs:
           owner: lemonade-hq
           permission-contents: read
           permission-issues: write
-          permission-pull-requests: read
+          permission-pull-requests: write
 
       - name: Verify org-wide App access
         env:
