@@ -305,27 +305,31 @@ https://github.com/owner/repo/pull/125,8,"Complex architectural changes across m
 
 ## GitHub Actions Integration
 
-### Automated Daily Labeling
+### Automated Labeling
 
-The repository includes a GitHub Actions workflow (`.github/workflows/daily-label.yml`) that automatically labels PRs with their complexity scores.
+The repository includes GitHub Actions workflows that automatically label PRs with their complexity scores and backfill recently updated PRs.
 
 **Features:**
-- Runs daily at 1am UTC
-- Labels all PRs closed the previous day
+- Processes recently updated PRs every 10 minutes
+- Runs a daily backfill at 2am UTC
 - Can be manually triggered with custom date ranges
 - Skips PRs that already have complexity labels
 
 **Manual Trigger:**
 
-You can trigger the workflow manually from the GitHub Actions tab with the following parameters:
-- `org`: GitHub organization name (required)
-- `since`: Start date (YYYY-MM-DD), defaults to yesterday
-- `until`: End date (YYYY-MM-DD), defaults to same as start date
-- `force`: Re-analyze PRs even if already labeled
+You can trigger the main workflow manually from the GitHub Actions tab with the following parameters:
+- `since`: Start date (YYYY-MM-DD); when omitted, the workflow uses its rolling lookback
+- `until`: End date (YYYY-MM-DD); when omitted, the workflow uses its rolling lookback
+- `state`: PR state to process (`both`, `open`, or `closed`)
+
+The backfill workflow accepts a `days` input to control how far back it searches.
 
 **Required Secrets:**
-- `ORG_GITHUB_TOKEN`: GitHub PAT with repo access across the organization
+- `COMPLEXITY_APP_ID`: Numeric App ID of the organization-wide Complexity Analyzer GitHub App
+- `COMPLEXITY_APP_PRIVATE_KEY`: Private key generated for the Complexity Analyzer GitHub App
 - `OPENAI_API_KEY`: OpenAI API key for LLM analysis
+
+The GitHub App must be installed for the target organization repositories with pull requests read access and issues read/write access. The workflows generate a short-lived installation token for each run.
 
 ### Single PR Analysis in CI
 
