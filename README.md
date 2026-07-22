@@ -324,8 +324,10 @@ You can trigger the main workflow manually from the GitHub Actions tab with the 
 
 The backfill workflow accepts a `days` input to control how far back it searches.
 
+**Required Repository Variable:**
+- `COMPLEXITY_APP_CLIENT_ID`: Client ID of the organization-wide Complexity Analyzer GitHub App
+
 **Required Secrets:**
-- `COMPLEXITY_APP_ID`: Numeric App ID of the organization-wide Complexity Analyzer GitHub App
 - `COMPLEXITY_APP_PRIVATE_KEY`: Private key generated for the Complexity Analyzer GitHub App
 - `OPENAI_API_KEY`: OpenAI API key for LLM analysis
 

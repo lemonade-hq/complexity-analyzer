@@ -22,11 +22,32 @@ jobs:
         id: complexity-app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.COMPLEXITY_APP_ID }}
+          client-id: ${{ vars.COMPLEXITY_APP_CLIENT_ID }}
           private-key: ${{ secrets.COMPLEXITY_APP_PRIVATE_KEY }}
           owner: lemonade-hq
+          permission-contents: read
           permission-issues: write
           permission-pull-requests: read
+
+      - name: Verify org-wide App access
+        env:
+          GH_TOKEN: ${{ steps.complexity-app-token.outputs.token }}
+        run: |
+          installation="$(gh api /installation)"
+          app_slug="$(jq -r '.app_slug' <<< "$installation")"
+          repository_selection="$(jq -r '.repository_selection' <<< "$installation")"
+
+          if [ "$app_slug" != "lemonade-complexity-analyzer" ]; then
+            echo "Expected lemonade-complexity-analyzer, got $app_slug"
+            exit 1
+          fi
+          if [ "$repository_selection" != "all" ]; then
+            echo "GitHub App must be installed on all repositories; got $repository_selection"
+            exit 1
+          fi
+
+          # Fail before analysis if the token cannot read PRs outside this repository.
+          gh api "repos/lemonade-hq/lemonade/pulls?state=all&per_page=1" >/dev/null
 
       - name: Set up Python
         uses: actions/setup-python@v5
