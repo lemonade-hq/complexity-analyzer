@@ -1,0 +1,206 @@
+{
+  "_comment": "Risk floors for sun-security/infrastructure (PLT-4017). Paths are fnmatch globs ('*' crosses '/'). Each factor is a MINIMUM enforced after the LLM call; on_version_change / on_removal raise it further. A module change fans out to every stack that sources it; a Terraform removal destroys what it managed.",
+  "rules": [
+    {
+      "paths": [
+        "terragrunt/root.hcl",
+        "*provider*.tf",
+        "*provider*.hcl",
+        "*backend*.tf"
+      ],
+      "reason": "Terraform root / provider / backend / version pins shared by every stack",
+      "blast_radius": 5,
+      "severity": 4,
+      "hazard": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "*versions.tf"
+      ],
+      "reason": "a module's required provider / Terraform version pins",
+      "blast_radius": 3,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 4
+      }
+    },
+    {
+      "paths": [
+        "terragrunt/aws/global/*",
+        "modules/organization-account/*",
+        "modules/sso-*",
+        "modules/github-oidc/*"
+      ],
+      "reason": "org-level identity: AWS accounts, SSO permission sets, GitHub OIDC trust",
+      "blast_radius": 5,
+      "severity": 5,
+      "hazard": 3,
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "modules/eks/*",
+        "modules/vpc/*",
+        "modules/vpc-peering/*",
+        "modules/rds/*",
+        "modules/rds-proxy/*",
+        "modules/route53-zone/*",
+        "modules/acm/*",
+        "modules/k8s-iam-roles/*",
+        "modules/tf-bucket/*",
+        "modules/netbird-routing-peer/*",
+        "modules/s3-interface-endpoint/*"
+      ],
+      "reason": "core foundation module: the change applies to every environment that sources it (EKS, VPC, RDS, DNS, certs, IRSA, state buckets)",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5,
+        "severity": 5
+      }
+    },
+    {
+      "paths": [
+        "modules/argo/*",
+        "modules/argo-apps/*",
+        "modules/arc/*",
+        "modules/kargo/*"
+      ],
+      "reason": "GitOps/CI control plane module (ArgoCD, app-of-apps, ARC runners): a break stops every deploy",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 2,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "modules/tenant/*",
+        "modules/tenants-shared/*"
+      ],
+      "reason": "tenant module shared by every tenant root (DB, buckets, IRSA)",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5,
+        "severity": 5
+      }
+    },
+    {
+      "paths": [
+        "terragrunt/aws/prod/*/eks/*",
+        "terragrunt/aws/prod/*/vpc*",
+        "terragrunt/aws/prod/*/rds/*",
+        "terragrunt/aws/prod/*/rds-proxy/*",
+        "terragrunt/aws/prod/*/route53*",
+        "terragrunt/aws/prod/*/acm*",
+        "terragrunt/aws/prod/*/k8s-iam-roles/*",
+        "terragrunt/aws/prod/*/netbird/*",
+        "terragrunt/aws/prod/*/s3-interface-endpoint/*",
+        "terragrunt/aws/prod/*/tf-bucket/*",
+        "terragrunt/aws/prod/*/argo/*",
+        "terragrunt/aws/prod/*/argo-apps/*",
+        "terragrunt/aws/ops/*/eks/*",
+        "terragrunt/aws/ops/*/vpc/*",
+        "terragrunt/aws/ops/*/rds/*",
+        "terragrunt/aws/ops/*/route53*",
+        "terragrunt/aws/ops/*/acm*",
+        "terragrunt/aws/ops/*/k8s-iam-roles/*",
+        "terragrunt/aws/ops/*/argo/*",
+        "terragrunt/aws/ops/*/argo-apps/*",
+        "terragrunt/aws/ops/*/arc/*",
+        "terragrunt/aws/ops/*/github-oidc/*",
+        "terragrunt/aws/ops/*/netbird/*"
+      ],
+      "reason": "prod/ops foundation stack (cluster, network, database, DNS, certs, IRSA, ArgoCD)",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5,
+        "severity": 5
+      }
+    },
+    {
+      "paths": [
+        "terragrunt/aws/prod/*/tenants/*"
+      ],
+      "reason": "a prod tenant root (tenant DB, buckets, roles)",
+      "blast_radius": 3,
+      "severity": 4,
+      "on_removal": {
+        "hazard": 5,
+        "severity": 5
+      }
+    },
+    {
+      "paths": [
+        "terragrunt/aws/prod/*",
+        "terragrunt/aws/ops/*"
+      ],
+      "reason": "a prod/ops Terraform stack",
+      "blast_radius": 3,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 3
+      },
+      "on_removal": {
+        "hazard": 4
+      }
+    },
+    {
+      "paths": [
+        "terragrunt/aws/dev/*/eks/*",
+        "terragrunt/aws/dev/*/vpc/*",
+        "terragrunt/aws/dev/*/rds/*",
+        "terragrunt/aws/dev/*/k8s-iam-roles/*",
+        "terragrunt/aws/staging/*/eks/*",
+        "terragrunt/aws/staging/*/vpc/*",
+        "terragrunt/aws/staging/*/rds/*",
+        "terragrunt/aws/staging/*/rds-proxy/*",
+        "terragrunt/aws/staging/*/k8s-iam-roles/*"
+      ],
+      "reason": "non-prod foundation stack: a break blocks dev, staging and every PR env",
+      "blast_radius": 2,
+      "severity": 3,
+      "hazard": 2,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "policies/*"
+      ],
+      "reason": "Atlantis policy gate guarding every apply",
+      "blast_radius": 3,
+      "severity": 4
+    }
+  ]
+}

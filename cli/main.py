@@ -33,6 +33,7 @@ from .constants import (  # noqa: E402
     DEFAULT_SLEEP_SECONDS,
     DEFAULT_TIMEOUT,
     DIMENSION_KEYS,
+    get_max_score,
     use_dimension_scoring,
 )
 from .errors import ErrorHandler  # noqa: E402
@@ -48,6 +49,7 @@ from .io_safety import normalize_path, write_json_atomic  # noqa: E402
 from .llm import LLMError, OpenAIProvider  # noqa: E402
 from .logging_config import get_logger, setup_logging  # noqa: E402
 from .preprocess import make_prompt_input, process_diff  # noqa: E402
+from .risk import assess_risk  # noqa: E402
 from .scoring import InvalidResponseError  # noqa: E402
 from .utils import parse_pr_url  # noqa: E402
 
@@ -211,11 +213,23 @@ def analyze_pr_to_dict(
         "url": pr_url,
         "title": title,
     }
-    # Dimension scoring only: raw per-dimension sub-scores plus risk rescaled
-    # onto the same 1-max scale as the total (PLT-3619).
+    # Dimension scoring only: raw per-dimension sub-scores, plus risk on the
+    # same 1-max scale as the total. Risk comes from its own call and the
+    # repo's risk map (PLT-4017), not the complexity call's risk dimension —
+    # scored alongside complexity it just echoed it (PLT-3619 found r=0.9).
     if "dimensions" in result:
         output["dimensions"] = result["dimensions"]
-        output["risk"] = result["risk"]
+        output.update(
+            assess_risk(
+                provider,
+                repo=repo,
+                diff_text=diff_text,
+                diff_excerpt=diff_for_prompt,
+                stats_json=json.dumps(stats),
+                title=title,
+                max_score=get_max_score(),
+            )
+        )
 
     return output
 
@@ -369,7 +383,9 @@ def _analyze_pr_impl(
             }
             if "dimensions" in output:
                 json_fields["dimensions"] = output["dimensions"]
-                json_fields["risk"] = output["risk"]
+                for key in ("risk", "risk_factors", "risk_explanation"):
+                    if key in output:
+                        json_fields[key] = output[key]
             json_output = json.dumps(json_fields, ensure_ascii=False, indent=2)
             typer.echo(json_output)
 
@@ -954,6 +970,8 @@ def label_pr(
         typer.echo(f"Complexity score: {complexity}/10", err=True)
         if risk is not None:
             typer.echo(f"Risk score: {risk}", err=True)
+            if output.get("risk_explanation"):
+                typer.echo(f"Risk: {output['risk_explanation']}", err=True)
         typer.echo(f"Explanation: {output['explanation']}", err=True)
 
         # Update labels (risk only exists under dimension scoring)
@@ -995,6 +1013,8 @@ def label_pr(
             result["risk"] = risk
             result["risk_label"] = f"{risk_label_prefix}{risk}"
             result["dimensions"] = output.get("dimensions")
+            result["risk_factors"] = output.get("risk_factors")
+            result["risk_explanation"] = output.get("risk_explanation")
         typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
         # Set GitHub Action outputs if available

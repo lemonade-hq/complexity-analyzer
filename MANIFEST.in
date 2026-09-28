@@ -2,3 +2,4 @@ include README.md
 include LICENSE
 recursive-include cli/prompt *.txt
 
+recursive-include cli/risk_maps *.json

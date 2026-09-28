@@ -1,12 +1,13 @@
 """LLM provider adapter with JSON schema validation and retries."""
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from openai import OpenAI
 
 from .constants import DEFAULT_MODEL, DEFAULT_TIMEOUT
 from .llm_base import LLMProvider
+from .risk import parse_risk_response
 from .scoring import InvalidResponseError, parse_complexity_response
 
 
@@ -89,7 +90,55 @@ class OpenAIProvider(LLMProvider):
                 "content": f"diff_excerpt:\n{diff_excerpt}\n\nstats_json:\n{stats_json}\n\ntitle:\n{title}",
             },
         ]
+        return self._complete_json(
+            messages,
+            parse_complexity_response,
+            "{'complexity': <int 1..10>, 'explanation': '<string>'}",
+            max_retries,
+            retry_delay,
+        )
 
+    def assess_risk(
+        self,
+        prompt: str,
+        diff_excerpt: str,
+        stats_json: str,
+        title: str,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> Dict[str, Any]:
+        """
+        Score a PR's risk factors (sun-security fork, PLT-4017) — a separate
+        call from complexity so the two judgements cannot anchor each other.
+
+        Returns:
+            Dict with 'factors' (blast_radius/severity/hazard ints) and 'explanation'
+        """
+        messages = [
+            {"role": "system", "content": prompt},
+            {
+                "role": "user",
+                "content": f"diff_excerpt:\n{diff_excerpt}\n\nstats_json:\n{stats_json}\n\ntitle:\n{title}",
+            },
+        ]
+        return self._complete_json(
+            messages,
+            parse_risk_response,
+            "{'blast_radius': <int 1..5>, 'severity': <int 1..5>, 'hazard': <int 1..5>, "
+            "'explanation': '<string>'}",
+            max_retries,
+            retry_delay,
+        )
+
+    def _complete_json(
+        self,
+        messages: list,
+        parse: Callable[[str], Dict[str, Any]],
+        shape: str,
+        max_retries: int,
+        retry_delay: float,
+    ) -> Dict[str, Any]:
+        """Chat completion in JSON mode, parsed by `parse`, with repair retries."""
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(
@@ -104,7 +153,7 @@ class OpenAIProvider(LLMProvider):
                     raise LLMError("Empty response from OpenAI")
 
                 # Parse and validate response
-                result = parse_complexity_response(content)
+                result = parse(content)
 
                 # Add metadata
                 result["provider"] = self.provider_name
@@ -118,7 +167,7 @@ class OpenAIProvider(LLMProvider):
                 if attempt < max_retries - 1:
                     repair_prompt = (
                         "The previous response was invalid. Please respond with ONLY a valid JSON object "
-                        f"of the form: {{'complexity': <int 1..10>, 'explanation': '<string>'}}. "
+                        f"of the form: {shape}. "
                         f"Error: {str(e)}"
                     )
                     messages.append(

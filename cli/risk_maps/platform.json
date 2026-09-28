@@ -1,0 +1,135 @@
+{
+  "_comment": "Risk floors for sun-security/platform (PLT-4017). Paths are fnmatch globs ('*' crosses '/'). Each factor is a MINIMUM enforced after the LLM call; on_version_change / on_removal raise it further. platform code reaches prod through a release (a gitops chart bump), so ordinary service code floors at blast 3; schemas, the base chart and endpoint agents reach every tenant.",
+  "rules": [
+    {
+      "paths": [
+        "schemas/*.sql",
+        "schemas/*.hcl"
+      ],
+      "reason": "declarative Atlas schema applied to every tenant database on release; additive changes are routine, but a removed or rewritten table/column is dropped",
+      "blast_radius": 4,
+      "severity": 3,
+      "hazard": 2,
+      "on_removal": {
+        "hazard": 4,
+        "severity": 5
+      },
+      "removal_regex": "(?i)^\\s*(create\\s+table|\\w+\\s+(text|int|bigint|uuid|jsonb?|boolean|timestamptz?|varchar))"
+    },
+    {
+      "paths": [
+        "services/libs/migrations/*",
+        "services/dataMigrator/*"
+      ],
+      "reason": "data migrations run against every tenant database",
+      "blast_radius": 4,
+      "severity": 5,
+      "hazard": 4
+    },
+    {
+      "paths": [
+        "charts/sun/*",
+        "charts/common/*"
+      ],
+      "reason": "base tenant chart every tenant inherits on release",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 2,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 4
+      }
+    },
+    {
+      "paths": [
+        "charts/*"
+      ],
+      "reason": "deployable chart",
+      "blast_radius": 3,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 4
+      }
+    },
+    {
+      "paths": [
+        "services/endpointManagement/*",
+        "services/libs/brewcpe/*",
+        ".github/workflows/build-em-binaries.yaml"
+      ],
+      "reason": "endpoint agent binaries that auto-update on customer machines; a bad build is slow to recall",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 3
+    },
+    {
+      "paths": [
+        "applications/packages/browser-extension/*",
+        ".github/workflows/release-extension*.yaml"
+      ],
+      "reason": "browser extension shipped through the stores; a bad release cannot be rolled back instantly",
+      "blast_radius": 4,
+      "severity": 3,
+      "hazard": 3
+    },
+    {
+      "paths": [
+        "applications/packages/auth/*",
+        "services/scimServer/*",
+        "services/libs/goscim/*",
+        "services/libs/goencryption/*",
+        "charts/oauth-relay/*",
+        "*oauth*"
+      ],
+      "reason": "authentication, provisioning or encryption path",
+      "blast_radius": 3,
+      "severity": 5,
+      "hazard": 3
+    },
+    {
+      "paths": [
+        "proto/*"
+      ],
+      "reason": "cross-service gRPC/event contract",
+      "blast_radius": 3,
+      "severity": 3,
+      "hazard": 3,
+      "on_removal": {
+        "hazard": 4
+      }
+    },
+    {
+      "paths": [
+        "services/libs/*",
+        "applications/packages/shared/*",
+        "applications/packages/ui/*",
+        "connectors/libs/*"
+      ],
+      "reason": "shared library used by many services",
+      "blast_radius": 3,
+      "severity": 3
+    },
+    {
+      "paths": [
+        "services/dataIngestor/*",
+        "services/detectionEngine/*",
+        "services/libs/gokafka/*"
+      ],
+      "reason": "core ingestion / detection pipeline for every tenant",
+      "blast_radius": 3,
+      "severity": 4
+    },
+    {
+      "paths": [
+        ".github/workflows/release*.yaml",
+        ".github/workflows/build-*.yaml",
+        ".github/workflows/copy-*.yaml"
+      ],
+      "reason": "release and build pipeline",
+      "blast_radius": 3,
+      "severity": 3
+    }
+  ]
+}

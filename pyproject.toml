@@ -46,7 +46,7 @@ dev = [
 complexity-cli = "cli.main:app"
 
 [tool.setuptools.package-data]
-cli = ["prompt/*.txt"]
+cli = ["prompt/*.txt", "risk_maps/*.json"]
 
 [tool.black]
 line-length = 100

@@ -1,0 +1,93 @@
+Prompt-Version: risk-1
+
+You are given a pull request (PR) diff excerpt, lightweight stats, the title,
+and — when available — CODEBASE RISK CONTEXT: facts the repository's owners
+recorded about what the touched paths control.
+
+Your task: assess the RISK of landing this change — how bad it is if it is
+wrong, how far the damage spreads, and how likely/hard-to-undo a failure is.
+
+Risk is NOT complexity. Judge it independently of how much code changed or how
+hard it was to write. A one-line version bump of a cluster-wide controller in
+production can be far riskier than a 2,000-line feature behind a flag. Do not
+let the size of the diff pull any factor up or down.
+
+------------------------------------------------------------
+THE THREE FACTORS (each an integer 1–5)
+------------------------------------------------------------
+
+1. `blast_radius` — how much breaks if this change is wrong.
+   1: a single dev/PR-env resource, a test helper, an internal script, a
+      dashboard/alert wording.
+   2: one non-production environment (dev or staging), or one small
+      non-critical feature.
+   3: one production service, one production tenant, or a shared library /
+      chart that only reaches production through a later release.
+   4: a whole production cluster (every tenant on it), a cluster-wide
+      controller or operator (autoscaling, ingress/load balancers, DNS,
+      certificates, secrets sync, message broker, GitOps controller), a
+      production database, or the base chart / values every tenant inherits.
+   5: every production cluster at once, account/org-level identity (IAM,
+      SSO, OIDC), network foundations (VPC, peering, DNS zones), Terraform
+      state/backend/provider config, or anything global.
+
+2. `severity` — the worst realistic outcome if it goes wrong.
+   1: cosmetic; noisy or missing observability for a non-critical signal.
+   2: a degraded non-critical feature; engineers are annoyed.
+   3: a customer-visible feature outage, lost alerting, delayed processing,
+      or backlog that recovers once fixed.
+   4: full outage for affected customers, auth broken, ingestion stopped,
+      workloads cannot scale or schedule, deploys blocked.
+   5: data loss or corruption, security exposure (secrets, permissions
+      widened, auth bypass), or deletion of stateful resources.
+
+3. `hazard` — how likely the change is to misbehave and how hard it is to
+   back out.
+   1: no behavior change (rename, additive label, doc-like config) and
+      trivially revertible.
+   2: a small, well-understood tuning of a known value (a threshold, a
+      replica count, a resource request) — a revert restores the old state.
+   3: a real behavior change to a live system; a patch-level version bump;
+      new feature logic; a config change whose effect is only visible at
+      runtime.
+   4: an upgrade of a chart, operator, controller, CRD, provider or major
+      dependency (minor or major version); a schema migration; IAM or
+      network policy changes; Terraform changes that may replace resources;
+      anything whose real effect is not visible in the diff (it depends on
+      what the new version or the plan does).
+   5: destructive or one-way: deleting stateful resources, databases,
+      tenants, DNS records or secrets; data migrations/backfills; key
+      rotation; changes where a revert does not restore the previous state.
+
+------------------------------------------------------------
+HOW TO SCORE
+------------------------------------------------------------
+
+- Score each factor on its own evidence. The caller multiplies them, so a
+  hazardous change confined to dev (blast 2) still comes out low, and a
+  harmless no-op in prod (hazard 1) still comes out low.
+- Environment matters: identical edits to a dev path and to a prod path have
+  different blast radius. Paths such as `prod`, `prod-*`, `production`,
+  `global`, `ops` point at shared or customer-facing environments.
+- Version bumps are NOT low risk by default. Ask what the versioned thing
+  controls (blast_radius) and whether its upgrade can change behavior,
+  schemas or CRDs (hazard). A bump of a cluster-wide operator in prod is
+  typically blast 4, hazard 4.
+- Deletions deserve care: removing a Terraform resource, an ArgoCD app, a
+  tenant, a secret or a DNS record destroys what it managed.
+- The CODEBASE RISK CONTEXT, when present, is authoritative about what paths
+  control. The caller enforces its minimums itself, so do not inflate to
+  match it — use it to understand the change, and score above it when the
+  diff warrants.
+- Test files, markdown and comment-only lines were stripped from the diff.
+
+------------------------------------------------------------
+RESPONSE FORMAT
+------------------------------------------------------------
+
+Respond with a single strict JSON object:
+{"blast_radius": <int 1-5>, "severity": <int 1-5>, "hazard": <int 1-5>, "explanation": "<short rationale>"}
+
+- `explanation` is one short line (no newlines) naming what the change
+  controls and why each factor landed where it did.
+- No other keys, no text before or after the JSON, no comments.

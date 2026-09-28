@@ -1,0 +1,154 @@
+{
+  "_comment": "Risk floors for sun-security/gitops (PLT-4017). Paths are fnmatch globs ('*' crosses '/'). Each factor is a MINIMUM enforced after the LLM call; on_version_change / on_removal raise it further when the diff changes a version in, or removes something from, a matched file. gitops merges deploy on sync, so every aws/prod path reaches customers on merge.",
+  "rules": [
+    {
+      "paths": [
+        "aws/prod/*/infra/apps.yaml",
+        "aws/prod/*/infra/local-apps.yaml"
+      ],
+      "reason": "prod addon catalog: chart + version of every cluster-wide controller (KEDA, cert-manager, external-secrets, external-dns, LB controller, Redpanda operator, envoy)",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 2,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      },
+      "removal_regex": "^\\s*-\\s+name:"
+    },
+    {
+      "paths": [
+        "aws/prod/*/infra/values/keda.yaml",
+        "aws/prod/*/infra/values/cert-manager.yaml",
+        "aws/prod/*/infra/values/external-secrets.yaml",
+        "aws/prod/*/infra/values/external-dns.yaml",
+        "aws/prod/*/infra/values/aws-load-balancer-controller.yaml",
+        "aws/prod/*/infra/values/redpanda-operator.yaml",
+        "aws/prod/*/infra/values/envoy*.yaml",
+        "aws/prod/*/infra/values/metrics-server.yaml",
+        "aws/prod/*/infra/manifests/*"
+      ],
+      "reason": "prod cluster-wide controller config: a mistake stops scaling, ingress, DNS, certs or secrets for every tenant on the cluster",
+      "blast_radius": 4,
+      "severity": 4,
+      "hazard": 2,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "aws/prod/*/infra/*"
+      ],
+      "reason": "prod cluster infra (monitoring, LiteLLM, pgdog, Atlantis, Argo Workflows)",
+      "blast_radius": 4,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "aws/prod/*/sun/chart.yaml",
+        "aws/prod/*/sun/values.yaml"
+      ],
+      "reason": "prod base chart version / values inherited by every tenant on the cluster",
+      "blast_radius": 4,
+      "severity": 4,
+      "on_version_change": {
+        "hazard": 3
+      }
+    },
+    {
+      "paths": [
+        "aws/prod/*/sun/customers/*"
+      ],
+      "reason": "a single prod tenant's deployment",
+      "blast_radius": 3,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 3
+      },
+      "on_removal": {
+        "hazard": 5,
+        "severity": 5
+      }
+    },
+    {
+      "paths": [
+        "aws/prod/*/apps/*"
+      ],
+      "reason": "prod shared apps",
+      "blast_radius": 3,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 3
+      },
+      "on_removal": {
+        "hazard": 4
+      }
+    },
+    {
+      "paths": [
+        "aws/ops/*"
+      ],
+      "reason": "ops cluster: ArgoCD, Atlantis and the LiteLLM gateway that every environment deploys or calls through",
+      "blast_radius": 4,
+      "severity": 4,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      },
+      "removal_regex": "^\\s*-\\s+name:"
+    },
+    {
+      "paths": [
+        "charts/*"
+      ],
+      "reason": "gitops-local chart (envoy-gateway, litellm, pgdog, atlantis, argo-workflows, rds-monitoring) consumed straight from main by every cluster including prod",
+      "blast_radius": 4,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 5
+      }
+    },
+    {
+      "paths": [
+        "aws/staging/*/infra/*",
+        "aws/dev/*/infra/*"
+      ],
+      "reason": "non-prod cluster-wide infra: a break blocks dev, staging and every PR env",
+      "blast_radius": 2,
+      "severity": 3,
+      "on_version_change": {
+        "hazard": 4
+      },
+      "on_removal": {
+        "hazard": 4
+      },
+      "removal_regex": "^\\s*-\\s+name:"
+    },
+    {
+      "paths": [
+        "scripts/*",
+        ".github/*"
+      ],
+      "reason": "deploy tooling / CI (update-prod workflow, render scripts)",
+      "blast_radius": 2,
+      "severity": 3
+    }
+  ]
+}
